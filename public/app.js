@@ -284,18 +284,21 @@ function swapSides(wrap, wantLeft, animate) {
   if (!animate || !els[0].animate || (window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches)) return;
   els.forEach((el, i) => {
     const dx = before[i] - el.getBoundingClientRect().left;
-    if (dx) el.animate([{ transform: `translateX(${dx}px)` }, { transform: 'translateX(0)' }], { duration: 520, easing: 'cubic-bezier(.22,1,.36,1)' });
+    if (!dx) return;
+    el.style.willChange = 'transform';
+    const a = el.animate([{ transform: `translate3d(${dx}px,0,0)` }, { transform: 'translate3d(0,0,0)' }], { duration: 650, easing: 'cubic-bezier(.65,0,.35,1)' });
+    a.onfinish = a.oncancel = () => { el.style.willChange = ''; };
   });
 }
 function authGo(view, extra, animate = true) {
   const b = $('#authbody');
   if (!b || authBusy) return;
+  const wideScreen = !!(window.matchMedia && window.matchMedia('(min-width:900px)').matches);
   const wrap = $('.authwrap');
   if (wrap) {
     const wantLeft = formOnLeft(view, extra);
     if (wrap.classList.contains('swap') !== wantLeft) {
-      const wide = window.matchMedia && window.matchMedia('(min-width:900px)').matches;
-      swapSides(wrap, wantLeft, wide && animate);
+      swapSides(wrap, wantLeft, wideScreen && animate);
     }
   }
   const dir = (view === 'login' || (authView === 'signup' && view === 'login')) ? 'left' : 'right';
@@ -305,7 +308,7 @@ function authGo(view, extra, animate = true) {
   const mount = () => {
     b.innerHTML = `${authTabsHtml(view)}
       <div id="auth-stage" class="auth-stage">
-        <div id="auth-panel" class="auth-panel auth-in auth-in-${dir}">${panelHtmlFor(view, extra)}</div>
+        <div id="auth-panel" class="auth-panel auth-in auth-in-${dir}${wideScreen ? ' auth-wide' : ''}">${panelHtmlFor(view, extra)}</div>
       </div>`;
     bindAuthView(view, extra);
     authBusy = false;
@@ -317,9 +320,10 @@ function authGo(view, extra, animate = true) {
   }
   authBusy = true;
   panel.classList.remove('auth-in', 'auth-in-left', 'auth-in-right');
+  if (wideScreen) panel.classList.add('auth-wide');
   panel.classList.add('auth-out', dir === 'left' ? 'auth-out-left' : 'auth-out-right');
   /* Match CSS authOut duration (160ms desktop / ~120ms touch) */
-  const outMs = (window.matchMedia && window.matchMedia('(hover:none) and (pointer:coarse)').matches) ? 130 : 170;
+  const outMs = wideScreen ? 150 : ((window.matchMedia && window.matchMedia('(hover:none) and (pointer:coarse)').matches) ? 130 : 170);
   setTimeout(mount, outMs);
 }
 

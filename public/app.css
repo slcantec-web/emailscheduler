@@ -415,3 +415,22 @@ a.tile:active{transform:scale(.98)}
   .auth-stage{flex:none;min-height:0;overflow:visible}
   .auth-panel{position:relative;inset:auto;overflow:visible}
 }
+
+/* ---------- PC login: smoothness ---------- */
+@keyframes authFadeIn{from{opacity:0}to{opacity:1}}
+@keyframes authFadeOut{from{opacity:1}to{opacity:0}}
+@media (min-width:900px){
+  /* blur on a moving layer is expensive; the gradient behind is flat so it is not visible anyway */
+  .af{backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(255,255,255,.18)}
+  /* isolate each half so content changes never re-layout the whole page mid-swap */
+  .authtop,.authcard{contain:layout style;backface-visibility:hidden}
+  /* same height for log in / sign up so the form never jumps when the content changes */
+  .auth-stage{min-height:440px}
+  /* content change = pure fade (the halves already carry the motion) */
+  .auth-wide{will-change:opacity}
+  .auth-wide.auth-in{animation:authFadeIn .34s cubic-bezier(.22,1,.36,1) both}
+  .auth-wide.auth-out{animation:authFadeOut .15s ease-in both}
+}
+@media (prefers-reduced-motion:reduce){
+  .auth-wide.auth-in,.auth-wide.auth-out{animation:none}
+}
