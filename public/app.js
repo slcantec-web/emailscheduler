@@ -24,7 +24,7 @@ const ICON = {
   mega: 'M3 11v2a1 1 0 0 0 1 1h3l8 5V5L7 10H4a1 1 0 0 0-1 1zM19 8a5 5 0 0 1 0 8',
   scroll: 'M8 21h12a2 2 0 0 0 2-2v-2H10v2a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v3h4M19 17V5a2 2 0 0 0-2-2H4',
 };
-const ic = (n) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${ICON[n] || ''}"/></svg>`;
+const ic = (n) => `<svg class="ico" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${ICON[n] || ''}"/></svg>`;
 const LOGO = '<svg viewBox="0 0 24 24" fill="#fff"><path d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>';
 
 let me = null, mySettings = {}, busyNav = 0;
@@ -621,9 +621,23 @@ async function pageMore() {
     items.push({ id: 'campaigns', label: 'Campaigns', icon: 'mega' });
     items.push({ id: 'settings', label: 'System settings', icon: 'settings' });
   }
+  if (!isStandalone()) items.push({ id: 'install-pwa', label: 'Install app', icon: 'home' });
   items.push({ id: 'logout', label: 'Log out', icon: 'logout' });
-  $('#main').innerHTML = `<div class="card">${items.map((i) => `<a href="#" class="menuitem" data-nav="${i.id}">${ic(i.icon)} ${esc(i.label)}</a>`).join('')}</div>`;
-  $$('[data-nav]').forEach((el) => el.onclick = (e) => { e.preventDefault(); go(el.dataset.nav); });
+  $('#main').innerHTML = `<div class="card menu">${items.map((i) => `<a href="#" class="menuitem" data-nav="${i.id}">${ic(i.icon)}<span>${esc(i.label)}</span></a>`).join('')}</div>`;
+  $$('[data-nav]').forEach((el) => el.onclick = (e) => {
+    e.preventDefault();
+    const id = el.dataset.nav;
+    if (id === 'install-pwa') {
+      try { localStorage.removeItem('pwa_dismiss'); } catch { /* ignore */ }
+      hidePwaBanner();
+      if (deferredPrompt) showPwaBanner('install');
+      else if (isIos()) showPwaBanner('ios');
+      else if (isSamsung()) showPwaBanner('samsung');
+      else showPwaBanner('manual');
+      return;
+    }
+    go(id);
+  });
 }
 
 async function pageAdmin() {
@@ -775,18 +789,27 @@ async function boot() {
 }
 boot();
 
-/* ---------- PWA install banner (mobile + desktop) ---------- */
+/* ---------- PWA install banner (mobile + desktop, incl. Samsung) ---------- */
 let deferredPrompt = null;
 const isStandalone = () =>
   window.matchMedia('(display-mode: standalone)').matches ||
   window.navigator.standalone === true;
 const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
-const isMobile = () => /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent) || window.innerWidth < 768;
+const isSamsung = () => /SamsungBrowser/i.test(navigator.userAgent);
+const isMobile = () => /android|iphone|ipad|ipod|mobile|SamsungBrowser/i.test(navigator.userAgent) || window.innerWidth < 768;
 const pwaDismissed = () => {
-  try { return localStorage.getItem('pwa_dismiss') === '1'; } catch { return false; }
+  try {
+    const v = localStorage.getItem('pwa_dismiss');
+    if (!v) return false;
+    // Re-show after 3 days
+    if (v === '1') return true;
+    const t = Number(v);
+    if (Number.isFinite(t) && Date.now() - t < 3 * 864e5) return true;
+    return false;
+  } catch { return false; }
 };
 const setPwaDismissed = () => {
-  try { localStorage.setItem('pwa_dismiss', '1'); } catch { /* ignore */ }
+  try { localStorage.setItem('pwa_dismiss', String(Date.now())); } catch { /* ignore */ }
 };
 
 function hidePwaBanner() {
@@ -797,18 +820,28 @@ function hidePwaBanner() {
   }
 }
 
-function showPwaBanner(mode) {
-  // mode: 'install' (Android/Chrome) | 'ios' | 'manual'
-  if (isStandalone() || pwaDismissed() || $('#pwa-banner')) return;
-  const title = mode === 'ios'
-    ? 'Install Email Scheduler'
-    : 'Install this app';
-  const body = mode === 'ios'
-    ? 'Tap <strong>Share</strong> <span class="pwa-ios-icon">⎋</span> then <strong>Add to Home Screen</strong> for quick access.'
-    : mode === 'install'
-      ? 'Add Email Scheduler to your home screen — works offline for the app shell and feels like a native app.'
-      : 'Install from your browser menu: <strong>Add to Home Screen</strong> or the install icon in the address bar.';
-  const actions = mode === 'install'
+function showPwaBanner(mode, force = false) {
+  // mode: install | ios | samsung | manual
+  if (isStandalone()) return;
+  if (!force && (pwaDismissed() || $('#pwa-banner'))) return;
+  if ($('#pwa-banner')) hidePwaBanner();
+
+  let title = 'Install this app';
+  let body = 'Open the browser menu and choose <strong>Add page to → Home screen</strong> (or Install app).';
+  if (mode === 'ios') {
+    title = 'Install Email Scheduler';
+    body = 'Tap the <strong>Share</strong> button, then <strong>Add to Home Screen</strong>.';
+  } else if (mode === 'samsung') {
+    title = 'Add to Home screen';
+    body = 'Samsung Internet: tap the <strong>menu ☰</strong> → <strong>Add page to</strong> → <strong>Home screen</strong>.';
+  } else if (mode === 'install') {
+    body = 'Add Email Scheduler to your home screen for a faster, app-like experience.';
+  } else if (mode === 'manual') {
+    body = 'Browser menu → <strong>Install app</strong> or <strong>Add to Home screen</strong>.';
+  }
+
+  const canNative = mode === 'install' && !!deferredPrompt;
+  const actions = canNative
     ? `<button type="button" class="btn pwa-install-btn" id="pwa-install">Install</button>
        <button type="button" class="btn ghost pwa-later-btn" id="pwa-later">Not now</button>`
     : `<button type="button" class="btn pwa-install-btn" id="pwa-gotit">Got it</button>
@@ -830,14 +863,15 @@ function showPwaBanner(mode) {
   requestAnimationFrame(() => bar.classList.add('pwa-show'));
 
   const later = () => { setPwaDismissed(); hidePwaBanner(); };
-  $('#pwa-later', bar).onclick = later;
+  const laterBtn = $('#pwa-later', bar);
+  if (laterBtn) laterBtn.onclick = later;
   const got = $('#pwa-gotit', bar);
   if (got) got.onclick = later;
   const inst = $('#pwa-install', bar);
   if (inst) {
     inst.onclick = async () => {
       if (!deferredPrompt) {
-        toast('Open browser menu → Install app / Add to Home Screen', 'good');
+        toast('Use browser menu → Add to Home screen', 'good');
         return;
       }
       deferredPrompt.prompt();
@@ -852,22 +886,24 @@ function showPwaBanner(mode) {
 
 function maybeShowPwaBanner() {
   if (isStandalone() || pwaDismissed()) return;
-  // Delay so it doesn't clash with first paint / login
   setTimeout(() => {
-    if (isStandalone() || pwaDismissed()) return;
+    if (isStandalone() || pwaDismissed() || $('#pwa-banner')) return;
     if (deferredPrompt) showPwaBanner('install');
-    else if (isIos() && isMobile()) showPwaBanner('ios');
+    else if (isIos()) showPwaBanner('ios');
+    else if (isSamsung()) showPwaBanner('samsung');
     else if (isMobile()) showPwaBanner('manual');
-  }, 1800);
+  }, 1200);
 }
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  navigator.serviceWorker.register('/sw.js').then(() => {
+    // SW ready helps some browsers (incl. Samsung) treat the site as installable
+  }).catch(() => {});
 }
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
-  if (!pwaDismissed() && !isStandalone() && !$('#pwa-banner')) showPwaBanner('install');
+  if (!pwaDismissed() && !isStandalone()) showPwaBanner('install');
 });
 window.addEventListener('appinstalled', () => {
   deferredPrompt = null;
