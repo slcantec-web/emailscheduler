@@ -774,21 +774,105 @@ async function boot() {
   }
 }
 boot();
+
+/* ---------- PWA install banner (mobile + desktop) ---------- */
+let deferredPrompt = null;
+const isStandalone = () =>
+  window.matchMedia('(display-mode: standalone)').matches ||
+  window.navigator.standalone === true;
+const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+const isMobile = () => /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent) || window.innerWidth < 768;
+const pwaDismissed = () => {
+  try { return localStorage.getItem('pwa_dismiss') === '1'; } catch { return false; }
+};
+const setPwaDismissed = () => {
+  try { localStorage.setItem('pwa_dismiss', '1'); } catch { /* ignore */ }
+};
+
+function hidePwaBanner() {
+  const el = $('#pwa-banner');
+  if (el) {
+    el.classList.add('pwa-hide');
+    setTimeout(() => el.remove(), 280);
+  }
+}
+
+function showPwaBanner(mode) {
+  // mode: 'install' (Android/Chrome) | 'ios' | 'manual'
+  if (isStandalone() || pwaDismissed() || $('#pwa-banner')) return;
+  const title = mode === 'ios'
+    ? 'Install Email Scheduler'
+    : 'Install this app';
+  const body = mode === 'ios'
+    ? 'Tap <strong>Share</strong> <span class="pwa-ios-icon">⎋</span> then <strong>Add to Home Screen</strong> for quick access.'
+    : mode === 'install'
+      ? 'Add Email Scheduler to your home screen — works offline for the app shell and feels like a native app.'
+      : 'Install from your browser menu: <strong>Add to Home Screen</strong> or the install icon in the address bar.';
+  const actions = mode === 'install'
+    ? `<button type="button" class="btn pwa-install-btn" id="pwa-install">Install</button>
+       <button type="button" class="btn ghost pwa-later-btn" id="pwa-later">Not now</button>`
+    : `<button type="button" class="btn pwa-install-btn" id="pwa-gotit">Got it</button>
+       <button type="button" class="btn ghost pwa-later-btn" id="pwa-later">Not now</button>`;
+
+  const bar = document.createElement('div');
+  bar.id = 'pwa-banner';
+  bar.className = 'pwa-banner';
+  bar.innerHTML = `
+    <div class="pwa-banner-inner">
+      <div class="pwa-icon">${LOGO}</div>
+      <div class="pwa-text">
+        <strong>${title}</strong>
+        <span>${body}</span>
+      </div>
+      <div class="pwa-actions">${actions}</div>
+    </div>`;
+  document.body.appendChild(bar);
+  requestAnimationFrame(() => bar.classList.add('pwa-show'));
+
+  const later = () => { setPwaDismissed(); hidePwaBanner(); };
+  $('#pwa-later', bar).onclick = later;
+  const got = $('#pwa-gotit', bar);
+  if (got) got.onclick = later;
+  const inst = $('#pwa-install', bar);
+  if (inst) {
+    inst.onclick = async () => {
+      if (!deferredPrompt) {
+        toast('Open browser menu → Install app / Add to Home Screen', 'good');
+        return;
+      }
+      deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      deferredPrompt = null;
+      setPwaDismissed();
+      hidePwaBanner();
+      if (choice && choice.outcome === 'accepted') toast('App installed!', 'good');
+    };
+  }
+}
+
+function maybeShowPwaBanner() {
+  if (isStandalone() || pwaDismissed()) return;
+  // Delay so it doesn't clash with first paint / login
+  setTimeout(() => {
+    if (isStandalone() || pwaDismissed()) return;
+    if (deferredPrompt) showPwaBanner('install');
+    else if (isIos() && isMobile()) showPwaBanner('ios');
+    else if (isMobile()) showPwaBanner('manual');
+  }, 1800);
+}
+
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
-// PWA install hint (Chrome/Edge on PC & Android)
-let deferredPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   deferredPrompt = e;
+  if (!pwaDismissed() && !isStandalone() && !$('#pwa-banner')) showPwaBanner('install');
 });
-window.__installPwa = async () => {
-  if (!deferredPrompt) {
-    toast('On mobile: browser menu → Add to Home Screen. On PC: use the install icon in the address bar.', 'good');
-    return;
-  }
-  deferredPrompt.prompt();
-  await deferredPrompt.userChoice;
+window.addEventListener('appinstalled', () => {
   deferredPrompt = null;
-};
+  setPwaDismissed();
+  hidePwaBanner();
+  toast('Email Scheduler installed!', 'good');
+});
+maybeShowPwaBanner();

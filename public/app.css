@@ -195,3 +195,37 @@ textarea{min-height:110px;resize:vertical}
 .otp{letter-spacing:.5em;text-align:center;font-size:22px;font-weight:700}
 .linkbtn{background:none;border:0;color:var(--brand);font-weight:700;cursor:pointer;padding:6px 0}
 .err-text{color:var(--bad);font-size:13px;margin-top:8px;min-height:18px}
+
+/* PWA install banner */
+.pwa-banner{
+  position:fixed;left:12px;right:12px;bottom:calc(12px + var(--safe-b,0px));z-index:100;
+  opacity:0;transform:translateY(24px) scale(.96);pointer-events:none;
+  transition:opacity .28s ease,transform .32s cubic-bezier(.16,1,.3,1);
+}
+.pwa-banner.pwa-show{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
+.pwa-banner.pwa-hide{opacity:0;transform:translateY(16px) scale(.97);pointer-events:none}
+.pwa-banner-inner{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  background:var(--card);color:var(--text);
+  border:1px solid var(--line);border-radius:18px;
+  padding:12px 14px;box-shadow:0 12px 40px rgba(20,22,50,.18);
+}
+.pwa-icon{
+  width:44px;height:44px;border-radius:12px;flex:none;
+  background:var(--grad);display:grid;place-items:center;
+}
+.pwa-icon svg{width:22px;height:22px}
+.pwa-text{flex:1;min-width:160px}
+.pwa-text strong{display:block;font-size:14px;font-weight:800;margin-bottom:2px}
+.pwa-text span{display:block;font-size:12.5px;color:var(--muted);line-height:1.4}
+.pwa-text span strong{display:inline;font-size:inherit;color:var(--text)}
+.pwa-actions{display:flex;gap:8px;flex:none;margin-left:auto}
+.pwa-install-btn{padding:8px 14px;font-size:13px}
+.pwa-later-btn{padding:8px 12px;font-size:13px}
+.pwa-ios-icon{display:inline-block;transform:rotate(90deg);font-weight:700}
+@media (min-width:900px){
+  .pwa-banner{left:auto;right:20px;bottom:20px;width:380px}
+}
+@media (max-width:639px){
+  .bottomnav ~ * .pwa-banner,body:has(.bottomnav) .pwa-banner{bottom:calc(72px + var(--safe-b,0px))}
+}
