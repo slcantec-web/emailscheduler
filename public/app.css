@@ -138,38 +138,55 @@ textarea{min-height:110px;resize:vertical}
 .auth-howto strong,.auth-howto em{font-style:normal;font-weight:700}
 .authcard{background:var(--card);border-radius:26px 26px 0 0;padding:22px 20px calc(30px + var(--safe-b));flex:1;margin-top:-20px;box-shadow:0 -8px 40px rgba(20,22,50,.12)}
 .authcard>div{max-width:420px;margin:0 auto;width:100%}
-.auth-lead{color:var(--muted);font-size:13.5px;margin:0 0 14px;line-height:1.4;min-height:2.8em}
-.auth-foot{text-align:center;margin-top:16px;line-height:1.4;min-height:2.6em}
-/* Fixed panel height so Log in / Sign up don't resize the card */
-.auth-panel{
-  min-height:280px;
+.auth-lead{color:var(--muted);font-size:13.5px;margin:0 0 14px;line-height:1.4}
+.auth-lead strong{color:var(--text);font-weight:700}
+.auth-foot{text-align:center;margin-top:auto;padding-top:12px;line-height:1.4}
+.auth-spacer{flex:1;min-height:12px}
+.tabs-single button{cursor:default}
+/* Fixed stage height — same for login / signup / forgot / otp */
+.auth-stage{
+  height:340px;
   position:relative;
+  overflow:hidden;
 }
-.auth-panel-in{
-  animation:authIn .28s cubic-bezier(.22,.68,0,1.1) both;
+.auth-panel{
+  position:absolute;
+  inset:0;
+  display:flex;
+  flex-direction:column;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  padding-bottom:4px;
 }
-.auth-panel-out{
-  animation:authOut .18s ease-in both;
-  pointer-events:none;
-}
+.auth-in{animation:authIn .42s cubic-bezier(.16,1,.3,1) both}
+.auth-in-left{--ax:-28px}
+.auth-in-right{--ax:28px}
+.auth-out{animation:authOut .22s cubic-bezier(.4,0,1,1) both;pointer-events:none}
+.auth-out-left{--ax:-24px}
+.auth-out-right{--ax:24px}
 @keyframes authIn{
-  from{opacity:0;transform:translateX(14px) scale(.98)}
-  to{opacity:1;transform:translateX(0) scale(1)}
+  0%{opacity:0;transform:translateX(var(--ax,20px)) scale(.94);filter:blur(6px)}
+  60%{opacity:1;filter:blur(0)}
+  100%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}
 }
 @keyframes authOut{
-  from{opacity:1;transform:translateX(0) scale(1)}
-  to{opacity:0;transform:translateX(-10px) scale(.98)}
+  0%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}
+  100%{opacity:0;transform:translateX(var(--ax,16px)) scale(.96);filter:blur(4px)}
 }
 @media (prefers-reduced-motion:reduce){
-  .auth-panel-in,.auth-panel-out{animation:none}
+  .auth-in,.auth-out{animation:none}
 }
 @media (min-width:640px){
   .authwrap{justify-content:center;align-items:center;padding:32px 24px;flex-direction:row;gap:40px;flex-wrap:wrap}
   .authtop{padding:0;text-align:left;max-width:380px;margin:0}
   .authtop .logo{margin:0 0 14px}
   .auth-features{margin:18px 0}
-  .authcard{border-radius:24px;flex:none;width:420px;min-height:420px;margin:0;box-shadow:0 30px 80px rgba(0,0,0,.28)}
-  .auth-panel{min-height:300px}
+  .authcard{border-radius:24px;flex:none;width:420px;height:480px;margin:0;box-shadow:0 30px 80px rgba(0,0,0,.28);display:flex;flex-direction:column}
+  .authcard>div{flex:1;display:flex;flex-direction:column}
+  .auth-stage{height:380px;flex:1}
+}
+@media (max-width:639px){
+  .auth-stage{height:360px}
 }
 @media (max-width:420px){
   .auth-features{grid-template-columns:1fr}

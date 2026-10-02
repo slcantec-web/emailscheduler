@@ -110,7 +110,13 @@ function renderAuth() {
 }
 const emailField = (v = '') => `<label>Email address</label><input name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" value="${esc(v)}" required>`;
 
-function authTabs(active) {
+let authView = 'login';
+let authBusy = false;
+
+function authTabsHtml(active) {
+  if (active === 'forgot' || active === 'otp') {
+    return `<div class="tabs tabs-single"><button type="button" class="on">${active === 'forgot' ? 'Reset password' : 'Verify code'}</button></div>`;
+  }
   return `<div class="tabs">
     <button type="button" class="${active === 'login' ? 'on' : ''}" data-auth-tab="login">Log in</button>
     <button type="button" class="${active === 'signup' ? 'on' : ''}" data-auth-tab="signup">Sign up</button>
@@ -137,101 +143,148 @@ function signupPanelHtml() {
     <p class="hint">Use an email you can access — the code arrives in a few seconds.</p>
     <button class="btn block">Send verification code</button>
   </form>
+  <div class="auth-spacer"></div>
   <div class="auth-foot muted small">Already have an account? Tap <strong>Log in</strong>.</div>`;
 }
 
-function bindAuthTabs(active) {
+function forgotPanelHtml() {
+  return `
+  <p class="auth-lead">Enter your email and we’ll send a verification code to reset your password.</p>
+  <form id="f">
+    ${emailField()}
+    <button class="btn block">Send reset code</button>
+  </form>
+  <div class="auth-spacer"></div>
+  <div class="row" style="justify-content:center;margin-top:12px"><button type="button" class="linkbtn" id="back">← Back to log in</button></div>`;
+}
+
+function otpPanelHtml(email, mode) {
+  return `
+  <p class="auth-lead">Code sent to <strong>${esc(email)}</strong>. Enter it below.</p>
+  <form id="f">
+    <label>Verification code</label>
+    <input class="otp" name="otp" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="••••••" required>
+    ${mode === 'register' ? `<label>Your name</label><input name="display_name" autocomplete="name" maxlength="60" required>
+      <label>Password</label><input name="password" type="password" minlength="8" autocomplete="new-password" required>
+      <p class="hint">At least 8 characters.</p>` : ''}
+    ${mode === 'reset' ? `<label>New password</label><input name="password" type="password" minlength="8" autocomplete="new-password" required>
+      <p class="hint">At least 8 characters.</p>` : ''}
+    <button class="btn block">${mode === 'reset' ? 'Reset password' : 'Create account'}</button>
+  </form>
+  <div class="row" style="justify-content:center;margin-top:10px"><button type="button" class="linkbtn" id="back">← Back</button></div>`;
+}
+
+function bindAuthView(view, extra) {
+  authView = view;
   $$('[data-auth-tab]').forEach((btn) => {
     btn.onclick = () => {
       const tab = btn.dataset.authTab;
-      if (tab === active) return;
-      if (tab === 'login') authShowTab('login');
-      else authShowTab('signup');
+      if (tab === authView) return;
+      authGo(tab);
     };
   });
+  if (view === 'login') {
+    const forgot = $('#forgot');
+    if (forgot) forgot.onclick = () => authGo('forgot');
+    const form = $('#f');
+    if (form) form.onsubmit = (e) => {
+      e.preventDefault();
+      withBtn($('.btn', form), async () => {
+        const d = await api('/api/auth/login', 'POST', fd(e.target));
+        me = d.user;
+        boot();
+      });
+    };
+  } else if (view === 'signup') {
+    const form = $('#f');
+    if (form) form.onsubmit = (e) => {
+      e.preventDefault();
+      const d = fd(e.target);
+      withBtn($('.btn', form), async () => {
+        await api('/api/auth/register/request', 'POST', d);
+        authGo('otp', { email: d.email, mode: 'register' });
+      });
+    };
+  } else if (view === 'forgot') {
+    const back = $('#back');
+    if (back) back.onclick = () => authGo('login');
+    const form = $('#f');
+    if (form) form.onsubmit = (e) => {
+      e.preventDefault();
+      const d = fd(e.target);
+      withBtn($('.btn', form), async () => {
+        await api('/api/auth/password/forgot', 'POST', d);
+        toast('If that email exists, a code was sent.', 'good');
+        authGo('otp', { email: d.email, mode: 'reset' });
+      });
+    };
+  } else if (view === 'otp' && extra) {
+    const back = $('#back');
+    if (back) back.onclick = () => authGo(extra.mode === 'reset' ? 'forgot' : 'signup');
+    const form = $('#f');
+    if (form) form.onsubmit = (e) => {
+      e.preventDefault();
+      const d = { email: extra.email, ...fd(e.target) };
+      withBtn($('.btn', form), async () => {
+        if (extra.mode === 'register') {
+          const r = await api('/api/auth/register/verify', 'POST', d);
+          me = r.user;
+          boot();
+        } else {
+          await api('/api/auth/password/reset', 'POST', d);
+          toast('Password updated. Please log in.', 'good');
+          authGo('login');
+        }
+      });
+    };
+  }
 }
 
-function bindLoginForm() {
+function panelHtmlFor(view, extra) {
+  if (view === 'login') return loginPanelHtml();
+  if (view === 'signup') return signupPanelHtml();
+  if (view === 'forgot') return forgotPanelHtml();
+  if (view === 'otp') return otpPanelHtml(extra.email, extra.mode);
+  return loginPanelHtml();
+}
+
+function authGo(view, extra, animate = true) {
   const b = $('#authbody');
-  const forgot = $('#forgot');
-  if (forgot) forgot.onclick = authForgot1;
-  const form = $('#f', b);
-  if (form) form.onsubmit = (e) => {
-    e.preventDefault();
-    withBtn($('.btn', form), async () => {
-      const d = await api('/api/auth/login', 'POST', fd(e.target));
-      me = d.user;
-      boot();
-    });
-  };
-}
-
-function bindSignupForm() {
-  const form = $('#f');
-  if (form) form.onsubmit = (e) => {
-    e.preventDefault();
-    const d = fd(e.target);
-    withBtn($('.btn', form), async () => {
-      await api('/api/auth/register/request', 'POST', d);
-      authOtp(d.email, 'register');
-    });
-  };
-}
-
-function authShowTab(tab, animate = true) {
-  const b = $('#authbody');
-  if (!b) return;
+  if (!b || authBusy) return;
+  const dir = (view === 'login' || (authView === 'signup' && view === 'login')) ? 'left' : 'right';
+  const stage = $('#auth-stage', b) || b;
   const panel = $('#auth-panel', b);
-  const html = tab === 'login' ? loginPanelHtml() : signupPanelHtml();
-  const apply = () => {
-    b.innerHTML = `${authTabs(tab)}<div id="auth-panel" class="auth-panel auth-panel-in">${html}</div>`;
-    bindAuthTabs(tab);
-    if (tab === 'login') bindLoginForm();
-    else bindSignupForm();
+
+  const mount = () => {
+    b.innerHTML = `${authTabsHtml(view)}
+      <div id="auth-stage" class="auth-stage">
+        <div id="auth-panel" class="auth-panel auth-in auth-in-${dir}">${panelHtmlFor(view, extra)}</div>
+      </div>`;
+    bindAuthView(view, extra);
+    authBusy = false;
   };
+
   if (!animate || !panel) {
-    apply();
+    mount();
     return;
   }
-  panel.classList.remove('auth-panel-in');
-  panel.classList.add('auth-panel-out');
-  setTimeout(apply, 180);
+  authBusy = true;
+  panel.classList.remove('auth-in', 'auth-in-left', 'auth-in-right');
+  panel.classList.add('auth-out', dir === 'left' ? 'auth-out-left' : 'auth-out-right');
+  setTimeout(mount, 220);
 }
 
 function authLogin() {
-  const b = $('#authbody');
-  b.innerHTML = `${authTabs('login')}<div id="auth-panel" class="auth-panel auth-panel-in">${loginPanelHtml()}</div>`;
-  bindAuthTabs('login');
-  bindLoginForm();
+  authGo('login', null, false);
 }
-
 function authRegister1() {
-  authShowTab('signup', true);
-}
-function authOtp(email, mode) {
-  const b = $('#authbody');
-  b.innerHTML = `<h3 style="font-size:20px">Enter the code</h3><p class="muted">Sent to ${esc(email)}</p>
-  <form id="f"><input class="otp" name="otp" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="••••••" required>
-  ${mode === 'register' ? '<label>Your name</label><input name="display_name" autocomplete="name" maxlength="60" required><label>Password</label><input name="password" type="password" minlength="8" autocomplete="new-password" required><p class="hint">At least 8 characters.</p>' : ''}
-  ${mode === 'reset' ? '<label>New password</label><input name="password" type="password" minlength="8" autocomplete="new-password" required><p class="hint">At least 8 characters.</p>' : ''}
-  <button class="btn block">${mode === 'reset' ? 'Reset password' : 'Create account'}</button></form>
-  <div class="row" style="justify-content:space-between;margin-top:8px"><button class="linkbtn" id="back">← Back</button></div>`;
-  $('#back').onclick = authLogin;
-  $('#f').onsubmit = (e) => {
-    e.preventDefault(); const d = { email, ...fd(e.target) };
-    withBtn($('.btn', b), async () => {
-      if (mode === 'register') { const r = await api('/api/auth/register/verify', 'POST', d); me = r.user; boot(); }
-      else { await api('/api/auth/password/reset', 'POST', d); toast('Password updated. Please log in.', 'good'); authLogin(); }
-    });
-  };
+  authGo('signup');
 }
 function authForgot1() {
-  const b = $('#authbody');
-  b.innerHTML = `<h3 style="font-size:20px">Reset password</h3><p class="muted">We'll email you a code.</p>
-  <form id="f">${emailField()}<button class="btn block">Send code</button></form>
-  <div class="row" style="margin-top:8px"><button class="linkbtn" id="back">← Back</button></div>`;
-  $('#back').onclick = authLogin;
-  $('#f').onsubmit = (e) => { e.preventDefault(); const d = fd(e.target); withBtn($('.btn', b), async () => { await api('/api/auth/password/forgot', 'POST', d); toast('If that email exists, a code was sent.', 'good'); authOtp(d.email, 'reset'); }); };
+  authGo('forgot');
+}
+function authOtp(email, mode) {
+  authGo('otp', { email, mode });
 }
 
 /* ---------- shell ---------- */
