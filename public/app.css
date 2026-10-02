@@ -115,7 +115,7 @@ textarea{min-height:110px;resize:vertical}
 .sheet h3{font-size:18px;margin-bottom:4px}
 @media (min-width:640px){.overlay{align-items:center}.sheet{border-radius:22px}}
 @keyframes up{from{transform:translateY(30px);opacity:0}}@keyframes fade{from{opacity:0}}
-.menu a,.menu button,.menuitem{
+.menu a,.menu button,.menu .menuitem,a.menuitem{
   display:flex;align-items:center;gap:14px;width:100%;
   padding:14px 10px;border:0;background:none;
   border-bottom:1px solid var(--line);color:var(--text);
@@ -123,12 +123,13 @@ textarea{min-height:110px;resize:vertical}
   text-decoration:none;box-sizing:border-box;
 }
 .menu a:last-child,.menu .menuitem:last-child{border-bottom:0}
-.menu svg,.menuitem svg,.ico{
+.menu svg,.menu .menuitem svg,svg.ico{
   width:22px!important;height:22px!important;
   min-width:22px;min-height:22px;max-width:22px;max-height:22px;
   flex:none;color:var(--brand);display:block;
 }
 .menuitem span{flex:1;line-height:1.3}
+.btn svg,.btn .ico{width:18px!important;height:18px!important;min-width:18px;min-height:18px;flex:none}
 
 #toasts{position:fixed;left:0;right:0;top:calc(var(--hdr) + var(--safe-t) + 10px);z-index:200;display:flex;flex-direction:column;align-items:center;gap:8px;pointer-events:none;padding:0 12px}
 .toast{background:#1b1d2e;color:#fff;padding:11px 16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.3);font-weight:600;max-width:440px;animation:up .2s}
@@ -204,6 +205,14 @@ textarea{min-height:110px;resize:vertical}
   .auth-features{grid-template-columns:1fr}
   .authtop h1{font-size:24px}
 }
+
+/* Ensure all inline SVG icons stay small */
+svg.ico,svg.icon-svg{width:22px;height:22px;vertical-align:middle}
+.btn svg.ico,.btn svg.icon-svg{width:18px;height:18px}
+
+/* Ensure all inline SVG icons stay small */
+svg.ico{width:22px;height:22px;vertical-align:middle}
+.btn svg.ico{width:18px;height:18px}
 .otp{letter-spacing:.5em;text-align:center;font-size:22px;font-weight:700}
 .linkbtn{background:none;border:0;color:var(--brand);font-weight:700;cursor:pointer;padding:6px 0}
 .err-text{color:var(--bad);font-size:13px;margin-top:8px;min-height:18px}
