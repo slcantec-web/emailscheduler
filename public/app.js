@@ -23,11 +23,28 @@ const ICON = {
   shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
   mega: 'M3 11v2a1 1 0 0 0 1 1h3l8 5V5L7 10H4a1 1 0 0 0-1 1zM19 8a5 5 0 0 1 0 8',
   scroll: 'M8 21h12a2 2 0 0 0 2-2v-2H10v2a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v3h4M19 17V5a2 2 0 0 0-2-2H4',
+  back: 'M15 18l-6-6 6-6',
 };
 const ic = (n) => `<svg class="icon-svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${ICON[n] || ''}"/></svg>`;
 const LOGO = '<svg viewBox="0 0 24 24" fill="#fff"><path d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>';
 
 let me = null, mySettings = {}, busyNav = 0;
+
+/* ---------- navigation state (back button + phone back gesture) ---------- */
+const TOP = ['home', 'send', 'schedules', 'contacts', 'more'];
+const PARENT = { history: 'more', templates: 'more', profile: 'more', admin: 'more', campaigns: 'more', settings: 'more' };
+const TITLES = { home: 'Email Scheduler', send: 'Send email', schedules: 'Schedules', contacts: 'Contacts', more: 'More', history: 'Email history', templates: 'Templates', profile: 'Profile', admin: 'Users', campaigns: 'Campaigns', settings: 'Settings' };
+let curPage = 'home', navDepth = 0, ignorePop = false, sendPrefill = null;
+function updateTopbar() {
+  const tb = $('#topbar'); if (!tb) return;
+  tb.classList.toggle('has-back', curPage !== 'home');
+  $('#tbtitle').textContent = TITLES[curPage] || 'Email Scheduler';
+  $('#tbsub').textContent = curPage === 'home' ? ((me && me.display_name) || '') : 'Email Scheduler';
+}
+function goBack() {
+  if (navDepth > 0) history.back();
+  else go(PARENT[curPage] || 'home', { replace: true });
+}
 
 /* ---------- api / ui helpers ---------- */
 async function api(path, method = 'GET', body) {
@@ -46,10 +63,18 @@ function toast(msg, kind = '') {
 }
 function modal(html, ready) {
   const o = document.createElement('div'); o.className = 'overlay';
-  o.innerHTML = `<div class="sheet" role="dialog"><div class="grab"></div>${html}</div>`;
-  const close = () => o.remove();
+  o.innerHTML = `<div class="sheet" role="dialog"><div class="grab"></div><button type="button" class="sheet-x" aria-label="Close">&times;</button>${html}</div>`;
+  let pushed = false;
+  try { history.pushState({ page: curPage, depth: navDepth, modal: 1 }, ''); pushed = true; } catch { /* ignore */ }
+  const close = (fromPop) => {
+    if (!o.isConnected) return;
+    o.remove();
+    if (pushed) { pushed = false; if (fromPop !== true) { ignorePop = true; history.back(); } }
+  };
+  o._close = close;
   o.addEventListener('click', (e) => { if (e.target === o) close(); });
   document.body.append(o);
+  $('.sheet-x', o).onclick = () => close();
   if (ready) ready($('.sheet', o), close);
   return close;
 }
@@ -108,6 +133,7 @@ function renderAuth() {
   </div>`;
   authLogin();
 }
+const pwField = (name, auto, label = 'Password', min = false) => `<label>${label}</label><div class="pw"><input name="${name}" type="password" autocomplete="${auto}" ${min ? 'minlength="8"' : ''} required><button type="button" class="pw-toggle" data-pw aria-label="Show or hide password">Show</button></div>`;
 const emailField = (v = '') => `<label>Email address</label><input name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" value="${esc(v)}" required>`;
 
 let authView = 'login';
@@ -128,7 +154,7 @@ function loginPanelHtml() {
   <p class="auth-lead">Welcome back. Enter your email and password to continue.</p>
   <form id="f">
     ${emailField()}
-    <label>Password</label><input name="password" type="password" autocomplete="current-password" required>
+    ${pwField('password', 'current-password')}
     <button class="btn block">Log in</button>
   </form>
   <div class="row" style="justify-content:center;margin-top:12px"><button type="button" class="linkbtn" id="forgot">Forgot password?</button></div>
@@ -165,9 +191,9 @@ function otpPanelHtml(email, mode) {
     <label>Verification code</label>
     <input class="otp" name="otp" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="••••••" required>
     ${mode === 'register' ? `<label>Your name</label><input name="display_name" autocomplete="name" maxlength="60" required>
-      <label>Password</label><input name="password" type="password" minlength="8" autocomplete="new-password" required>
+      ${pwField('password', 'new-password', 'Password', true)}
       <p class="hint">At least 8 characters.</p>` : ''}
-    ${mode === 'reset' ? `<label>New password</label><input name="password" type="password" minlength="8" autocomplete="new-password" required>
+    ${mode === 'reset' ? `${pwField('password', 'new-password', 'New password', true)}
       <p class="hint">At least 8 characters.</p>` : ''}
     <button class="btn block">${mode === 'reset' ? 'Reset password' : 'Create account'}</button>
   </form>
@@ -293,7 +319,7 @@ function authOtp(email, mode) {
 function shell(title, sub) {
   const isAdmin = me && me.role === 'ADMIN';
   $('#app').innerHTML = `
-  <header class="topbar"><div class="logo">${LOGO}</div><div><h1>${esc(title)}</h1>${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</div>
+  <header class="topbar" id="topbar"><button class="backbtn" id="back" type="button" aria-label="Go back">${ic('back')}</button><div class="logo">${LOGO}</div><div class="tb-text"><h1 id="tbtitle">${esc(title)}</h1><span class="sub" id="tbsub">${esc(sub || '')}</span></div>
   <div class="who"><button class="avatar" id="avatar">${esc((me.display_name || '?')[0].toUpperCase())}</button></div></header>
   <nav class="sidebar" id="side"></nav>
   <div class="shell"><main class="main" id="main">${loading()}</main></div>
@@ -315,12 +341,13 @@ function shell(title, sub) {
   $('#side').innerHTML = groups.map((g) => `<div class="sec">${g.t}</div>` + g.items.map((n) => `<a href="#" class="${n.id === 'logout' ? 'logout' : ''}" data-nav="${n.id}">${ic(n.icon)}${n.label}</a>`).join('')).join('');
   $$('[data-nav]').forEach((el) => el.onclick = (e) => { e.preventDefault(); go(el.dataset.nav); });
   $('#avatar').onclick = () => go('profile');
+  $('#back').onclick = goBack;
 }
 function setNav(id) {
   const moreIds = ['history', 'templates', 'profile', 'admin', 'campaigns', 'settings'];
   $$('#bnav button, #side a').forEach((el) => el.classList.toggle('on', el.dataset.nav === id || (el.dataset.nav === 'more' && moreIds.includes(id))));
 }
-async function go(id) {
+async function go(id, opts = {}) {
   if (busyNav) return;
   busyNav = 1;
   try {
@@ -331,6 +358,14 @@ async function go(id) {
       }
       return;
     }
+    if (id === 'home' && curPage !== 'home' && navDepth > 0 && !opts.fromPop) { history.go(-navDepth); return; }
+    if (!opts.fromPop && id !== curPage) {
+      const replace = opts.replace || (!opts.push && TOP.includes(id) && TOP.includes(curPage) && curPage !== 'home');
+      if (replace) { try { history.replaceState({ page: id, depth: navDepth }, ''); } catch { /* ignore */ } }
+      else { navDepth++; try { history.pushState({ page: id, depth: navDepth }, ''); } catch { /* ignore */ } }
+    }
+    curPage = id;
+    updateTopbar();
     setNav(id);
     const main = $('#main');
     main.innerHTML = loading();
@@ -393,6 +428,12 @@ async function pageSend() {
     <label class="check"><input type="checkbox" name="append_signature" value="1" checked> Append signature</label>
     <button class="btn block" style="margin-top:12px">Send now</button>
   </form></div>`;
+  const sf = $('#f');
+  if (sendPrefill) { sf.recipient.value = sendPrefill.email; sf.recipient_name.value = sendPrefill.name || ''; sendPrefill = null; }
+  sf.recipient.addEventListener('change', () => {
+    const c = contacts.find((x) => x.email === sf.recipient.value.trim().toLowerCase());
+    if (c && !sf.recipient_name.value) sf.recipient_name.value = c.name;
+  });
   $('#f').onsubmit = (e) => {
     e.preventDefault();
     const d = fd(e.target);
@@ -409,8 +450,7 @@ async function pageSchedules() {
   const data = await api('/api/schedules');
   const list = data.schedules || [];
   $('#main').innerHTML = `
-  <div class="row" style="margin-bottom:12px"><h2 style="font-size:18px">Schedules</h2>
-  <button class="btn right" id="add">+ New</button></div>
+  <div class="page-head"><h2>Schedules</h2><button class="btn right" id="add">+ New</button></div>
   <p class="muted small">${list.filter((s) => ['PENDING', 'ACTIVE'].includes(s.status)).length}${data.limit == null ? ' active (unlimited)' : ` / ${data.limit} active`}</p>
   <div id="slist">${list.length ? list.map((s) => `
     <div class="card item">
@@ -419,7 +459,7 @@ async function pageSchedules() {
       <div class="small" style="margin-top:4px"><strong>${esc(s.subject_template || 'Reminder')}</strong></div>
       <div class="muted small">${esc((s.message_template || '').slice(0, 80))}${(s.message_template || '').length > 80 ? '…' : ''}</div>
       <div class="muted small" style="margin-top:6px">${scheduleRuleLabel(s)} · Next: ${fmtDT(s.next_run_at)}</div>
-      ${['PENDING', 'ACTIVE'].includes(s.status) ? `<div class="row" style="margin-top:8px"><button class="btn ghost danger smallbtn" data-cancel="${s.id}">Cancel</button></div>` : ''}
+      ${['PENDING', 'ACTIVE'].includes(s.status) ? `<div class="actions"><button class="btn ghost danger smallbtn" data-cancel="${s.id}">Cancel</button></div>` : ''}
     </div>`).join('') : '<div class="card muted">No schedules yet.</div>'}</div>`;
   $('#add').onclick = () => scheduleForm();
   $$('[data-cancel]').forEach((b) => b.onclick = async () => {
@@ -491,20 +531,31 @@ function scheduleForm() {
   });
 }
 
+const initials = (n) => (String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('') || '?').toUpperCase();
 async function pageContacts() {
   const data = await api('/api/contacts');
   const list = data.contacts || [];
   $('#main').innerHTML = `
-  <div class="row" style="margin-bottom:12px"><h2 style="font-size:18px">Contacts</h2>
+  <div class="page-head"><div><h2>Contacts</h2><p class="muted small">${list.length} saved</p></div>
   <button class="btn right" id="add">+ Add</button></div>
-  <div id="clist">${list.length ? list.map((c) => `
-    <div class="card item">
-      <div class="row"><strong>${esc(c.name)}</strong>
-        <button class="linkbtn right" data-del="${c.id}">Delete</button></div>
-      <div class="muted small">${esc(c.email)}</div>
-      ${c.birthday || c.anniversary ? `<div class="muted small" style="margin-top:4px">${c.birthday ? '🎂 ' + esc(fmtMD(c.birthday)) : ''} ${c.anniversary ? '💍 ' + esc(fmtMD(c.anniversary)) : ''}</div>` : ''}
-    </div>`).join('') : '<div class="card muted">No contacts yet.</div>'}</div>`;
+  <div id="clist">${list.length ? list.map((c, i) => `
+    <div class="card item contact">
+      <div class="contact-main">
+        <span class="avatar-sm">${esc(initials(c.name))}</span>
+        <div class="contact-info">
+          <strong>${esc(c.name)}</strong>
+          <span class="muted small ellip">${esc(c.email)}</span>
+          ${c.birthday || c.anniversary ? `<div class="contact-tags">${c.birthday ? `<span class="tag">🎂 ${esc(fmtMD(c.birthday))}</span>` : ''}${c.anniversary ? `<span class="tag">💍 ${esc(fmtMD(c.anniversary))}</span>` : ''}</div>` : ''}
+        </div>
+      </div>
+      <div class="actions"><button class="btn smallbtn" data-send="${i}">Send email</button><button class="btn ghost danger smallbtn" data-del="${c.id}">Delete</button></div>
+    </div>`).join('') : '<div class="card muted">No contacts yet. Tap + Add to save one.</div>'}</div>`;
   $('#add').onclick = () => contactForm();
+  $$('[data-send]').forEach((b) => b.onclick = () => {
+    const c = list[Number(b.dataset.send)];
+    sendPrefill = { email: c.email, name: c.name };
+    go('send', { push: true });
+  });
   $$('[data-del]').forEach((b) => b.onclick = async () => {
     if (!(await confirmBox('Delete contact', 'Remove this contact?', 'Delete'))) return;
     try { await api('/api/contacts/' + b.dataset.del, 'DELETE'); toast('Deleted', 'good'); pageContacts(); } catch (e) { toast(e.message, 'err'); }
@@ -536,7 +587,7 @@ async function pageHistory() {
   const data = await api('/api/email/history');
   const list = data.logs || [];
   $('#main').innerHTML = `
-  <h2 style="font-size:18px;margin-bottom:12px">Email history</h2>
+  <div class="page-head"><h2>Email history</h2></div>
   <div class="list">${list.length ? list.map((l) => `
     <div class="card item">
       <div class="row"><strong>${esc(l.subject_preview || '(no subject)')}</strong> ${statusBadge(l.status)}</div>
@@ -549,8 +600,7 @@ async function pageTemplates() {
   const data = await api('/api/templates');
   const list = data.templates || [];
   $('#main').innerHTML = `
-  <div class="row" style="margin-bottom:12px"><h2 style="font-size:18px">Templates</h2>
-  <button class="btn right" id="add">+ New</button></div>
+  <div class="page-head"><h2>Templates</h2><button class="btn right" id="add">+ New</button></div>
   <div class="list">${list.length ? list.map((t) => `
     <div class="card item">
       <div class="row"><strong>${esc(t.template_name)}</strong>
@@ -593,8 +643,8 @@ async function pageProfile() {
   <div class="card" style="margin-top:14px">
     <h3>Change password</h3>
     <form id="pw">
-      <label>Current password</label><input name="current_password" type="password" required>
-      <label>New password</label><input name="new_password" type="password" minlength="8" required>
+      ${pwField('current_password', 'current-password', 'Current password')}
+      ${pwField('new_password', 'new-password', 'New password', true)}
       <button class="btn block" style="margin-top:12px">Update password</button>
     </form>
   </div>`;
@@ -663,9 +713,9 @@ async function pageAdmin() {
   const list = data.users || [];
   const defaultLimit = data.default_schedule_limit ?? 5;
   $('#main').innerHTML = `
-  <h2 style="font-size:18px;margin-bottom:4px">Users</h2>
+  <div class="page-head"><h2>Users</h2></div>
   <p class="muted small" style="margin-bottom:12px">Default schedule limit: ${defaultLimit}. Times use Sri Lanka (UTC+5:30).</p>
-  ${list.length ? list.map((u) => {
+  <div class="list">${list.length ? list.map((u) => {
     const isAdm = u.role === 'ADMIN';
     const lim = isAdm ? null : (u.schedule_limit != null ? u.schedule_limit : defaultLimit);
     const custom = !isAdm && u.schedule_limit != null;
@@ -678,7 +728,7 @@ async function pageAdmin() {
         · Today: ${u.emails_today || 0}
         · Joined: ${fmtDT(u.created_at)}
       </div>
-      ${u.id !== me.id ? `<div class="row" style="margin-top:10px;gap:6px;flex-wrap:wrap">
+      ${u.id !== me.id ? `<div class="actions">
         ${u.status === 'ACTIVE'
           ? `<button class="btn ghost smallbtn" data-st="${u.id}:SUSPENDED">Deactivate</button>`
           : `<button class="btn smallbtn" data-st="${u.id}:ACTIVE">Activate</button>`}
@@ -686,7 +736,7 @@ async function pageAdmin() {
         ${!isAdm ? `<button class="btn ghost danger smallbtn" data-del="${u.id}">Remove</button>` : ''}
       </div>` : '<p class="muted small" style="margin-top:8px">This is you (admin — no limits)</p>'}
     </div>`;
-  }).join('') : '<div class="card muted">No users yet.</div>'}`;
+  }).join('') : '<div class="card muted">No users yet.</div>'}</div>`;
   $$('[data-st]').forEach((b) => b.onclick = async () => {
     const [id, status] = b.dataset.st.split(':');
     const label = status === 'ACTIVE' ? 'Activate this user?' : 'Deactivate this user? They will be logged out.';
@@ -727,15 +777,14 @@ async function pageCampaigns() {
   const data = await api('/api/admin/campaigns');
   const list = data.campaigns || [];
   $('#main').innerHTML = `
-  <div class="row" style="margin-bottom:12px"><h2 style="font-size:18px">Campaigns</h2>
-  <button class="btn right" id="add">+ New</button></div>
-  ${list.length ? list.map((c) => `
+  <div class="page-head"><h2>Campaigns</h2><button class="btn right" id="add">+ New</button></div>
+  <div class="list">${list.length ? list.map((c) => `
     <div class="card item">
       <div class="row"><strong>${esc(c.campaign_name)}</strong> ${statusBadge(c.status)}</div>
       <div class="muted small">${esc(c.subject)} · ${fmtDT(c.scheduled_at)}</div>
       <div class="small">Total ${c.total || 0} · Sent ${c.sent || 0} · Failed ${c.failed || 0} · Pending ${c.pending || 0}</div>
       ${['SCHEDULED', 'RUNNING'].includes(c.status) ? `<button class="btn ghost danger smallbtn" style="margin-top:8px" data-cancel="${c.id}">Cancel</button>` : ''}
-    </div>`).join('') : '<div class="card muted">No campaigns yet.</div>'}`;
+    </div>`).join('') : '<div class="card muted">No campaigns yet.</div>'}</div>`;
   $('#add').onclick = () => {
     modal(`<h3>New campaign</h3>
     <form id="cf">
@@ -802,7 +851,7 @@ async function pageSettings() {
         : `<input name="${x.k}" type="number" min="${x.min ?? 0}" ${x.max ? `max="${x.max}"` : ''} value="${esc(s[x.k] ?? '')}">`}
     </div>`;
   $('#main').innerHTML = `
-  <h2 style="font-size:18px;margin-bottom:2px">System settings</h2>
+  <div class="page-head"><h2>System settings</h2></div>
   <form id="sf">
     ${groups.map((g) => `
       <div class="sec-title">${esc(g.title)}</div>
@@ -827,7 +876,9 @@ async function boot() {
     const d = await api('/api/auth/me');
     me = d.user;
     shell('Email Scheduler', me.display_name);
-    go('home');
+    curPage = 'home'; navDepth = 0;
+    try { history.replaceState({ page: 'home', depth: 0 }, ''); } catch { /* ignore */ }
+    go('home', { fromPop: true });
   } catch {
     renderAuth();
   }
@@ -957,3 +1008,22 @@ window.addEventListener('appinstalled', () => {
   toast('Email Scheduler installed!', 'good');
 });
 maybeShowPwaBanner();
+
+/* ---------- back button (phone gesture / browser) + password show/hide ---------- */
+window.addEventListener('popstate', (e) => {
+  if (ignorePop) { ignorePop = false; return; }
+  const open = $$('.overlay');
+  if (open.length) { open.forEach((o) => o._close && o._close(true)); return; }
+  if (!me) return;
+  const st = e.state || {};
+  navDepth = st.depth || 0;
+  go(st.page || 'home', { fromPop: true });
+});
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-pw]');
+  if (!b) return;
+  const i = b.previousElementSibling;
+  const show = i.type === 'password';
+  i.type = show ? 'text' : 'password';
+  b.textContent = show ? 'Hide' : 'Show';
+});
