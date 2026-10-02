@@ -184,12 +184,15 @@ async function pageHome() {
   const d = await api('/api/auth/me');
   me = d.user; mySettings = d.limits || {};
   const u = d.usage || {};
+  const lim = d.limits || {};
+  const isAdmin = me.role === 'ADMIN';
   $('#main').innerHTML = `
+  ${isAdmin ? '<p class="muted small" style="margin-bottom:10px">Admin account — no schedule / email / contact limits apply.</p>' : ''}
   <div class="grid2">
-    <div class="card stat"><div class="label">Today's emails</div><div class="val">${u.emails_today || 0} <span class="of">/ ${d.limits.max_daily_emails}</span></div></div>
-    <div class="card stat"><div class="label">Active schedules</div><div class="val">${u.active_schedules || 0} <span class="of">/ ${d.limits.max_user_scheduled_messages}</span></div></div>
-    <div class="card stat"><div class="label">This month</div><div class="val">${u.emails_month || 0} <span class="of">/ ${d.limits.max_monthly_emails}</span></div></div>
-    <div class="card stat"><div class="label">Contacts</div><div class="val">${u.contacts || 0}</div></div>
+    <div class="card stat"><div class="label">Today's emails</div><div class="val">${u.emails_today || 0}${isAdmin ? '' : ` <span class="of">/ ${lim.max_daily_emails ?? '∞'}</span>`}</div></div>
+    <div class="card stat"><div class="label">Active schedules</div><div class="val">${u.active_schedules || 0}${isAdmin ? '' : ` <span class="of">/ ${lim.max_user_scheduled_messages ?? '∞'}</span>`}</div></div>
+    <div class="card stat"><div class="label">This month</div><div class="val">${u.emails_month || 0}${isAdmin ? '' : ` <span class="of">/ ${lim.max_monthly_emails ?? '∞'}</span>`}</div></div>
+    <div class="card stat"><div class="label">Contacts</div><div class="val">${u.contacts || 0}${isAdmin || lim.max_contacts == null ? '' : ` <span class="of">/ ${lim.max_contacts}</span>`}</div></div>
   </div>
   <div class="card" style="margin-top:14px">
     <h3>Quick actions</h3>
@@ -235,7 +238,7 @@ async function pageSchedules() {
   $('#main').innerHTML = `
   <div class="row" style="margin-bottom:12px"><h2 style="font-size:18px">Schedules</h2>
   <button class="btn right" id="add">+ New</button></div>
-  <p class="muted small">${list.filter((s) => ['PENDING', 'ACTIVE'].includes(s.status)).length} / ${data.limit} active</p>
+  <p class="muted small">${list.filter((s) => ['PENDING', 'ACTIVE'].includes(s.status)).length}${data.limit == null ? ' active (unlimited)' : ` / ${data.limit} active`}</p>
   <div id="slist">${list.length ? list.map((s) => `
     <div class="card item">
       <div class="row"><strong>${esc(TYPE_LABEL[s.schedule_type] || s.schedule_type)}</strong> ${statusBadge(s.status)}</div>
@@ -429,14 +432,15 @@ async function pageAdmin() {
   <h2 style="font-size:18px;margin-bottom:4px">Users</h2>
   <p class="muted small" style="margin-bottom:12px">Default schedule limit: ${defaultLimit}. Times use Sri Lanka (UTC+5:30).</p>
   ${list.length ? list.map((u) => {
-    const lim = u.schedule_limit != null ? u.schedule_limit : defaultLimit;
-    const custom = u.schedule_limit != null;
+    const isAdm = u.role === 'ADMIN';
+    const lim = isAdm ? null : (u.schedule_limit != null ? u.schedule_limit : defaultLimit);
+    const custom = !isAdm && u.schedule_limit != null;
     return `
     <div class="card item">
-      <div class="row"><strong>${esc(u.display_name)}</strong> ${statusBadge(u.status)} ${u.role === 'ADMIN' ? '<span class="badge info">ADMIN</span>' : ''}</div>
+      <div class="row"><strong>${esc(u.display_name)}</strong> ${statusBadge(u.status)} ${isAdm ? '<span class="badge info">ADMIN</span>' : ''}</div>
       <div class="muted small">${esc(u.email)}</div>
       <div class="muted small" style="margin-top:4px">
-        Active schedules: <strong>${u.active_schedules || 0}</strong> / ${lim}${custom ? ' (custom)' : ' (default)'}
+        Active schedules: <strong>${u.active_schedules || 0}</strong>${isAdm ? ' (unlimited)' : ` / ${lim}${custom ? ' (custom)' : ' (default)'}`}
         · Today: ${u.emails_today || 0}
         · Joined: ${fmtDT(u.created_at)}
       </div>
@@ -444,9 +448,9 @@ async function pageAdmin() {
         ${u.status === 'ACTIVE'
           ? `<button class="btn ghost smallbtn" data-st="${u.id}:SUSPENDED">Deactivate</button>`
           : `<button class="btn smallbtn" data-st="${u.id}:ACTIVE">Activate</button>`}
-        <button class="btn ghost smallbtn" data-limit="${u.id}" data-cur="${u.schedule_limit != null ? u.schedule_limit : ''}">Schedule limit</button>
-        ${u.role !== 'ADMIN' ? `<button class="btn ghost danger smallbtn" data-del="${u.id}">Remove</button>` : ''}
-      </div>` : '<p class="muted small" style="margin-top:8px">This is you</p>'}
+        ${!isAdm ? `<button class="btn ghost smallbtn" data-limit="${u.id}" data-cur="${u.schedule_limit != null ? u.schedule_limit : ''}">Schedule limit</button>` : ''}
+        ${!isAdm ? `<button class="btn ghost danger smallbtn" data-del="${u.id}">Remove</button>` : ''}
+      </div>` : '<p class="muted small" style="margin-top:8px">This is you (admin — no limits)</p>'}
     </div>`;
   }).join('') : '<div class="card muted">No users yet.</div>'}`;
   $$('[data-st]').forEach((b) => b.onclick = async () => {
@@ -543,6 +547,7 @@ async function pageSettings() {
   ];
   $('#main').innerHTML = `
   <div class="card"><h3>System settings</h3>
+  <p class="muted small">These limits apply to <strong>normal users only</strong>. Admin accounts have no schedule, email, or contact limits.</p>
   <form id="sf">${fields.map(([k, label]) => `<label>${esc(label)}</label><input name="${k}" type="number" value="${s[k] ?? ''}">`).join('')}
   <button class="btn block" style="margin-top:12px">Save settings</button></form></div>`;
   $('#sf').onsubmit = (e) => {

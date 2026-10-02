@@ -177,6 +177,8 @@ const ACTIVE = "('PENDING','ACTIVE','PROCESSING')";
 /* ---------- auth ---------- */
 const publicUser = (u) => ({ id: u.id, email: u.email, display_name: u.display_name, sender_name: u.sender_name, role: u.role, status: u.status, schedule_limit: u.schedule_limit ?? null, created_at: u.created_at, last_login_at: u.last_login_at });
 function userScheduleLimit(user, settings) {
+  // Admin has no schedule limit (not bound by default user settings)
+  if (user.role === 'ADMIN') return null;
   const n = user.schedule_limit;
   if (n != null && Number.isFinite(Number(n)) && Number(n) >= 0) return Number(n);
   return settings.max_user_scheduled_messages;
@@ -337,6 +339,7 @@ route('POST', '/api/auth/logout', 'user', async (c) => {
 });
 route('GET', '/api/auth/me', 'user', async (c) => {
   const t = now();
+  const isAdmin = c.user.role === 'ADMIN';
   const schedLimit = userScheduleLimit(c.user, c.settings);
   const [today, month, schedules, contacts] = await Promise.all([
     c.env.DB.prepare("SELECT COUNT(*) c FROM email_logs WHERE user_id=? AND status='SENT' AND message_type!='OTP' AND created_at>=?").bind(c.user.id, dayStart(t)).first(),
@@ -348,10 +351,11 @@ route('GET', '/api/auth/me', 'user', async (c) => {
     user: publicUser(c.user),
     usage: { emails_today: today.c, emails_month: month.c, active_schedules: schedules.c, contacts: contacts.c },
     limits: {
-      max_daily_emails: c.settings.max_daily_emails,
-      max_monthly_emails: c.settings.max_monthly_emails,
-      max_user_scheduled_messages: schedLimit,
-      max_contacts: c.settings.max_contacts,
+      // Admin is not bound by user limits
+      max_daily_emails: isAdmin ? null : c.settings.max_daily_emails,
+      max_monthly_emails: isAdmin ? null : c.settings.max_monthly_emails,
+      max_user_scheduled_messages: schedLimit, // null for admin = unlimited
+      max_contacts: isAdmin ? null : c.settings.max_contacts,
     },
   });
 });
@@ -396,7 +400,7 @@ route('GET', '/api/contacts', 'user', async (c) => {
 });
 route('POST', '/api/contacts', 'user', async (c) => {
   const cnt = await c.env.DB.prepare('SELECT COUNT(*) c FROM contacts WHERE user_id=?').bind(c.user.id).first();
-  if (cnt.c >= c.settings.max_contacts) throw new ApiError('CONTACT_LIMIT', `You can have at most ${c.settings.max_contacts} contacts.`, 403);
+  if (c.user.role !== 'ADMIN' && cnt.c >= c.settings.max_contacts) throw new ApiError('CONTACT_LIMIT', `You can have at most ${c.settings.max_contacts} contacts.`, 403);
   const name = clean(c.body.name, 80); if (!name) throw new ApiError('INVALID_NAME', 'Name is required.');
   const email = normalizeEmail(c.body.email); if (!email) throw new ApiError('INVALID_EMAIL', 'Enter a valid email address.');
   const birthday = toMMDD(c.body.birthday); if (birthday === false) throw new ApiError('INVALID_DATE', 'Invalid birthday (use MM-DD).');
@@ -486,8 +490,10 @@ route('GET', '/api/schedules', 'user', async (c) => {
 });
 route('POST', '/api/schedules', 'user', async (c) => {
   const limit = userScheduleLimit(c.user, c.settings);
-  const cnt = await c.env.DB.prepare(`SELECT COUNT(*) c FROM scheduled_messages WHERE user_id=? AND status IN ${ACTIVE}`).bind(c.user.id).first();
-  if (cnt.c >= limit) throw new ApiError('SCHEDULE_LIMIT', `You can have at most ${limit} active schedules.`, 403);
+  if (limit != null) {
+    const cnt = await c.env.DB.prepare(`SELECT COUNT(*) c FROM scheduled_messages WHERE user_id=? AND status IN ${ACTIVE}`).bind(c.user.id).first();
+    if (cnt.c >= limit) throw new ApiError('SCHEDULE_LIMIT', `You can have at most ${limit} active schedules.`, 403);
+  }
   const f = await buildSchedule(c.env, c.user, c.settings, c.body), t = now();
   const r = await c.env.DB.prepare('INSERT INTO scheduled_messages(user_id,contact_id,schedule_type,recipient_email,recipient_name,subject_template,message_template,sender_name,scheduled_at,next_run_at,recurrence_rule,send_time,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .bind(c.user.id, f.contactId, f.type, f.recipient, f.name || null, f.subject, f.message, f.sender || null, f.scheduledAt, f.nextRun, f.rule, f.time, f.status, t, t).run();
@@ -529,6 +535,9 @@ route('PUT', '/api/admin/users/:id/status', 'admin', async (c) => {
 });
 route('PUT', '/api/admin/users/:id/schedule-limit', 'admin', async (c) => {
   const id = Number(c.params.id);
+  const target = await c.env.DB.prepare('SELECT id, role FROM users WHERE id=?').bind(id).first();
+  if (!target) throw new ApiError('NOT_FOUND', 'User not found.', 404);
+  if (target.role === 'ADMIN') throw new ApiError('FORBIDDEN', 'Admin accounts have no schedule limit.', 403);
   let lim = c.body.schedule_limit;
   if (lim === null || lim === '' || lim === undefined) lim = null;
   else {
