@@ -262,7 +262,8 @@ function scheduleForm() {
     <label>Message</label><textarea name="message" rows="4" required placeholder="Hi {name}! ..."></textarea>
     <label>Date</label><input name="date" type="date" value="${slDate(1)}">
     <p class="hint">For birthday/anniversary use MM-DD (e.g. 04-18) or pick a date — day & month are used yearly.</p>
-    <label>Time (Sri Lanka)</label><input name="time" type="time" value="08:00" required>
+    <label>Time (Colombo, Sri Lanka UTC+5:30)</label><input name="time" type="time" value="08:00" required>
+    <p class="hint">All schedule times are interpreted in Asia/Colombo (+5:30).</p>
     <label>From name</label><input name="sender_name" maxlength="60" placeholder="${esc(me.sender_name || '')}">
     <button class="btn block" style="margin-top:12px">Schedule</button>
   </form>`, (sheet, close) => {
@@ -423,19 +424,63 @@ async function pageAdmin() {
   if (me.role !== 'ADMIN') return go('home');
   const data = await api('/api/admin/users');
   const list = data.users || [];
+  const defaultLimit = data.default_schedule_limit ?? 5;
   $('#main').innerHTML = `
-  <h2 style="font-size:18px;margin-bottom:12px">Users</h2>
-  ${list.map((u) => `
+  <h2 style="font-size:18px;margin-bottom:4px">Users</h2>
+  <p class="muted small" style="margin-bottom:12px">Default schedule limit: ${defaultLimit}. Times use Sri Lanka (UTC+5:30).</p>
+  ${list.length ? list.map((u) => {
+    const lim = u.schedule_limit != null ? u.schedule_limit : defaultLimit;
+    const custom = u.schedule_limit != null;
+    return `
     <div class="card item">
       <div class="row"><strong>${esc(u.display_name)}</strong> ${statusBadge(u.status)} ${u.role === 'ADMIN' ? '<span class="badge info">ADMIN</span>' : ''}</div>
-      <div class="muted small">${esc(u.email)} · schedules ${u.active_schedules || 0} · today ${u.emails_today || 0}</div>
-      ${u.id !== me.id ? `<div class="row" style="margin-top:8px;gap:6px">
-        ${u.status === 'ACTIVE' ? `<button class="btn ghost smallbtn" data-st="${u.id}:SUSPENDED">Suspend</button>` : `<button class="btn ghost smallbtn" data-st="${u.id}:ACTIVE">Activate</button>`}
-      </div>` : ''}
-    </div>`).join('')}`;
+      <div class="muted small">${esc(u.email)}</div>
+      <div class="muted small" style="margin-top:4px">
+        Active schedules: <strong>${u.active_schedules || 0}</strong> / ${lim}${custom ? ' (custom)' : ' (default)'}
+        · Today: ${u.emails_today || 0}
+        · Joined: ${fmtDT(u.created_at)}
+      </div>
+      ${u.id !== me.id ? `<div class="row" style="margin-top:10px;gap:6px;flex-wrap:wrap">
+        ${u.status === 'ACTIVE'
+          ? `<button class="btn ghost smallbtn" data-st="${u.id}:SUSPENDED">Deactivate</button>`
+          : `<button class="btn smallbtn" data-st="${u.id}:ACTIVE">Activate</button>`}
+        <button class="btn ghost smallbtn" data-limit="${u.id}" data-cur="${u.schedule_limit != null ? u.schedule_limit : ''}">Schedule limit</button>
+        ${u.role !== 'ADMIN' ? `<button class="btn ghost danger smallbtn" data-del="${u.id}">Remove</button>` : ''}
+      </div>` : '<p class="muted small" style="margin-top:8px">This is you</p>'}
+    </div>`;
+  }).join('') : '<div class="card muted">No users yet.</div>'}`;
   $$('[data-st]').forEach((b) => b.onclick = async () => {
     const [id, status] = b.dataset.st.split(':');
+    const label = status === 'ACTIVE' ? 'Activate this user?' : 'Deactivate this user? They will be logged out.';
+    if (!(await confirmBox(status === 'ACTIVE' ? 'Activate' : 'Deactivate', label, status === 'ACTIVE' ? 'Activate' : 'Deactivate'))) return;
     try { await api('/api/admin/users/' + id + '/status', 'PUT', { status }); toast('Updated', 'good'); pageAdmin(); } catch (e) { toast(e.message, 'err'); }
+  });
+  $$('[data-limit]').forEach((b) => b.onclick = () => {
+    const id = b.dataset.limit;
+    const cur = b.dataset.cur;
+    modal(`<h3>Schedule limit</h3>
+      <p class="muted small">Leave empty to use system default (${defaultLimit}).</p>
+      <form id="lf">
+        <label>Max active schedules</label>
+        <input name="schedule_limit" type="number" min="0" max="10000" placeholder="Default: ${defaultLimit}" value="${esc(cur)}">
+        <button class="btn block" style="margin-top:12px">Save</button>
+      </form>`, (sheet, close) => {
+      $('#lf', sheet).onsubmit = (e) => {
+        e.preventDefault();
+        const raw = fd(e.target).schedule_limit;
+        const schedule_limit = raw === '' || raw == null ? null : Number(raw);
+        withBtn($('.btn', e.target), async () => {
+          await api('/api/admin/users/' + id + '/schedule-limit', 'PUT', { schedule_limit });
+          toast('Limit updated', 'good');
+          close();
+          pageAdmin();
+        });
+      };
+    });
+  });
+  $$('[data-del]').forEach((b) => b.onclick = async () => {
+    if (!(await confirmBox('Remove user', 'Permanently delete this user and their data? This cannot be undone.', 'Remove'))) return;
+    try { await api('/api/admin/users/' + b.dataset.del, 'DELETE'); toast('User removed', 'good'); pageAdmin(); } catch (e) { toast(e.message, 'err'); }
   });
 }
 
@@ -460,8 +505,8 @@ async function pageCampaigns() {
       <label>Subject</label><input name="subject" required>
       <label>Message</label><textarea name="message" rows="5" required></textarea>
       <label>Recipients (emails, one per line or comma)</label><textarea name="recipients" rows="4" required></textarea>
-      <label>Date (optional, blank = now)</label><input name="date" type="date">
-      <label>Time</label><input name="time" type="time" value="09:00">
+      <label>Date (optional, blank = send now)</label><input name="date" type="date">
+      <label>Time (Colombo UTC+5:30)</label><input name="time" type="time" value="09:00">
       <button class="btn block" style="margin-top:12px">Create</button>
     </form>`, (sheet, close) => {
       $('#cf', sheet).onsubmit = (e) => {

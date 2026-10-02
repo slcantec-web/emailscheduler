@@ -175,7 +175,12 @@ async function checkQuota(env, user, settings, count = 1) {
 const ACTIVE = "('PENDING','ACTIVE','PROCESSING')";
 
 /* ---------- auth ---------- */
-const publicUser = (u) => ({ id: u.id, email: u.email, display_name: u.display_name, sender_name: u.sender_name, role: u.role, status: u.status, created_at: u.created_at, last_login_at: u.last_login_at });
+const publicUser = (u) => ({ id: u.id, email: u.email, display_name: u.display_name, sender_name: u.sender_name, role: u.role, status: u.status, schedule_limit: u.schedule_limit ?? null, created_at: u.created_at, last_login_at: u.last_login_at });
+function userScheduleLimit(user, settings) {
+  const n = user.schedule_limit;
+  if (n != null && Number.isFinite(Number(n)) && Number(n) >= 0) return Number(n);
+  return settings.max_user_scheduled_messages;
+}
 
 async function createSession(env, req, userId) {
   const token = rand(32), t = now();
@@ -332,6 +337,7 @@ route('POST', '/api/auth/logout', 'user', async (c) => {
 });
 route('GET', '/api/auth/me', 'user', async (c) => {
   const t = now();
+  const schedLimit = userScheduleLimit(c.user, c.settings);
   const [today, month, schedules, contacts] = await Promise.all([
     c.env.DB.prepare("SELECT COUNT(*) c FROM email_logs WHERE user_id=? AND status='SENT' AND message_type!='OTP' AND created_at>=?").bind(c.user.id, dayStart(t)).first(),
     c.env.DB.prepare("SELECT COUNT(*) c FROM email_logs WHERE user_id=? AND status='SENT' AND message_type!='OTP' AND created_at>=?").bind(c.user.id, monthStart(t)).first(),
@@ -344,7 +350,7 @@ route('GET', '/api/auth/me', 'user', async (c) => {
     limits: {
       max_daily_emails: c.settings.max_daily_emails,
       max_monthly_emails: c.settings.max_monthly_emails,
-      max_user_scheduled_messages: c.settings.max_user_scheduled_messages,
+      max_user_scheduled_messages: schedLimit,
       max_contacts: c.settings.max_contacts,
     },
   });
@@ -474,10 +480,14 @@ route('GET', '/api/email/history', 'user', async (c) => {
 });
 
 // --- schedules
-route('GET', '/api/schedules', 'user', async (c) => ok({ schedules: (await c.env.DB.prepare('SELECT * FROM scheduled_messages WHERE user_id=? ORDER BY (status IN (\'PENDING\',\'ACTIVE\',\'PROCESSING\')) DESC, next_run_at ASC LIMIT 200').bind(c.user.id).all()).results.map(scheduleOut), limit: c.settings.max_user_scheduled_messages }));
+route('GET', '/api/schedules', 'user', async (c) => {
+  const limit = userScheduleLimit(c.user, c.settings);
+  return ok({ schedules: (await c.env.DB.prepare('SELECT * FROM scheduled_messages WHERE user_id=? ORDER BY (status IN (\'PENDING\',\'ACTIVE\',\'PROCESSING\')) DESC, next_run_at ASC LIMIT 200').bind(c.user.id).all()).results.map(scheduleOut), limit });
+});
 route('POST', '/api/schedules', 'user', async (c) => {
+  const limit = userScheduleLimit(c.user, c.settings);
   const cnt = await c.env.DB.prepare(`SELECT COUNT(*) c FROM scheduled_messages WHERE user_id=? AND status IN ${ACTIVE}`).bind(c.user.id).first();
-  if (cnt.c >= c.settings.max_user_scheduled_messages) throw new ApiError('SCHEDULE_LIMIT', `You can have at most ${c.settings.max_user_scheduled_messages} active schedules.`, 403);
+  if (cnt.c >= limit) throw new ApiError('SCHEDULE_LIMIT', `You can have at most ${limit} active schedules.`, 403);
   const f = await buildSchedule(c.env, c.user, c.settings, c.body), t = now();
   const r = await c.env.DB.prepare('INSERT INTO scheduled_messages(user_id,contact_id,schedule_type,recipient_email,recipient_name,subject_template,message_template,sender_name,scheduled_at,next_run_at,recurrence_rule,send_time,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .bind(c.user.id, f.contactId, f.type, f.recipient, f.name || null, f.subject, f.message, f.sender || null, f.scheduledAt, f.nextRun, f.rule, f.time, f.status, t, t).run();
@@ -501,11 +511,11 @@ route('DELETE', '/api/schedules/:id', 'user', async (c) => {
 
 // --- admin
 route('GET', '/api/admin/users', 'admin', async (c) => {
-  const { results } = await c.env.DB.prepare(`SELECT u.id,u.email,u.display_name,u.role,u.status,u.created_at,u.last_login_at,
+  const { results } = await c.env.DB.prepare(`SELECT u.id,u.email,u.display_name,u.role,u.status,u.schedule_limit,u.created_at,u.last_login_at,
     (SELECT COUNT(*) FROM scheduled_messages s WHERE s.user_id=u.id AND s.status IN ${ACTIVE}) AS active_schedules,
     (SELECT COUNT(*) FROM email_logs l WHERE l.user_id=u.id AND l.status='SENT' AND l.message_type!='OTP' AND l.created_at>=?) AS emails_today
     FROM users u ORDER BY u.id DESC LIMIT 300`).bind(dayStart(now())).all();
-  return ok({ users: results, schedule_limit: c.settings.max_user_scheduled_messages });
+  return ok({ users: results, default_schedule_limit: c.settings.max_user_scheduled_messages });
 });
 route('PUT', '/api/admin/users/:id/status', 'admin', async (c) => {
   const id = Number(c.params.id), st = c.body.status;
@@ -515,6 +525,30 @@ route('PUT', '/api/admin/users/:id/status', 'admin', async (c) => {
   if (!r.meta.changes) throw new ApiError('NOT_FOUND', 'User not found.', 404);
   if (st !== 'ACTIVE') await c.env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(id).run();
   await audit(c.env, c.user.id, st === 'ACTIVE' ? 'USER_ACTIVATED' : 'USER_SUSPENDED', 'user', id, { status: st });
+  return ok({});
+});
+route('PUT', '/api/admin/users/:id/schedule-limit', 'admin', async (c) => {
+  const id = Number(c.params.id);
+  let lim = c.body.schedule_limit;
+  if (lim === null || lim === '' || lim === undefined) lim = null;
+  else {
+    lim = Number(lim);
+    if (!Number.isInteger(lim) || lim < 0 || lim > 10000) throw new ApiError('INVALID_LIMIT', 'Schedule limit must be 0–10000, or empty for default.');
+  }
+  const r = await c.env.DB.prepare('UPDATE users SET schedule_limit=?, updated_at=? WHERE id=?').bind(lim, now(), id).run();
+  if (!r.meta.changes) throw new ApiError('NOT_FOUND', 'User not found.', 404);
+  await audit(c.env, c.user.id, 'USER_SCHEDULE_LIMIT', 'user', id, { schedule_limit: lim });
+  return ok({ schedule_limit: lim });
+});
+route('DELETE', '/api/admin/users/:id', 'admin', async (c) => {
+  const id = Number(c.params.id);
+  if (id === c.user.id) throw new ApiError('FORBIDDEN', 'You cannot delete your own account.', 403);
+  const target = await c.env.DB.prepare('SELECT id, role, email FROM users WHERE id=?').bind(id).first();
+  if (!target) throw new ApiError('NOT_FOUND', 'User not found.', 404);
+  if (target.role === 'ADMIN') throw new ApiError('FORBIDDEN', 'Cannot delete another admin account.', 403);
+  await c.env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(id).run();
+  await c.env.DB.prepare('DELETE FROM users WHERE id=?').bind(id).run();
+  await audit(c.env, c.user.id, 'USER_DELETED', 'user', id, { email: target.email });
   return ok({});
 });
 route('POST', '/api/admin/users/:id/revoke-sessions', 'admin', async (c) => {

@@ -8,10 +8,14 @@ CREATE TABLE IF NOT EXISTS users (
   sender_name TEXT,
   role TEXT NOT NULL DEFAULT 'USER' CHECK (role IN ('USER','ADMIN')),
   status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','SUSPENDED','DISABLED')),
+  schedule_limit INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   last_login_at INTEGER
 );
+
+-- If upgrading an existing DB that already has users without schedule_limit:
+-- ALTER TABLE users ADD COLUMN schedule_limit INTEGER;
 
 CREATE TABLE IF NOT EXISTS sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
