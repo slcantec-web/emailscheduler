@@ -434,3 +434,40 @@ a.tile:active{transform:scale(.98)}
 @media (prefers-reduced-motion:reduce){
   .auth-wide.auth-in,.auth-wide.auth-out{animation:none}
 }
+
+/* ---------- PC login: fits every screen shape (square, wide, ultrawide, short) ---------- */
+@media (min-width:900px){
+  .authwrap{min-height:100vh;min-height:100dvh}
+  /* details side: content block scales with the screen and stays centred in its half */
+  .authtop{padding-block:clamp(24px,6vh,80px);padding-inline:max(clamp(28px,4vw,64px),calc((50vw - clamp(400px,28vw,580px)) / 2))}
+  .authtop .logo{width:clamp(60px,4.5vw,96px);height:clamp(60px,4.5vw,96px);border-radius:26%}
+  .authtop .logo svg{width:50%;height:50%}
+  .authtop h1{font-size:clamp(28px,2.4vw,54px)}
+  .authtop .tagline{font-size:clamp(15px,1.1vw,21px)}
+  .auth-features{grid-template-columns:repeat(auto-fit,minmax(clamp(150px,11vw,230px),1fr));gap:clamp(10px,.9vw,16px)}
+  .af strong{font-size:clamp(13px,.9vw,16.5px)}
+  .af small{font-size:clamp(11.5px,.8vw,14px)}
+  .af-ic{font-size:clamp(18px,1.3vw,24px)}
+  .auth-howto{font-size:clamp(12.5px,.9vw,15.5px)}
+  /* form side */
+  .authcard{padding:clamp(24px,4vw,64px)}
+  .authcard>div{max-width:clamp(400px,26vw,520px)}
+}
+/* short windows (small laptops, zoomed browsers, windowed): compact vertical spacing, page scrolls if still needed */
+@media (min-width:900px) and (max-height:720px){
+  .authtop{padding-block:24px}
+  .authtop .logo{width:56px;height:56px;margin-bottom:12px}
+  .authtop h1{font-size:28px}
+  .auth-features{margin:16px 0 12px}
+  .af{padding:9px 12px}
+  .auth-howto{display:none}
+  .authcard{padding-block:24px}
+  .auth-stage{min-height:400px}
+}
+@media (min-width:900px) and (max-height:560px){
+  .auth-features{display:none}
+}
+
+/* very large monitors: scale the form up so it does not look tiny in a huge half */
+@media (min-width:1900px){.authcard>div{zoom:1.15}}
+@media (min-width:2400px){.authcard>div{zoom:1.3}}
