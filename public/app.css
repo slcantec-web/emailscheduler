@@ -15,6 +15,8 @@ body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system
 h1,h2,h3{margin:0;line-height:1.25}
 a{color:var(--brand);text-decoration:none}
 button,input,select,textarea{font:inherit;color:inherit}
+/* A datalist only feeds the browser's suggestion dropdown; it must never render as page content */
+datalist{display:none!important}
 .hide{display:none!important}
 .muted{color:var(--muted)}.small{font-size:12.5px}.right{margin-left:auto}
 .splash{display:grid;place-items:center;min-height:100dvh}
@@ -267,10 +269,6 @@ textarea{min-height:110px;resize:vertical}
 /* Ensure all inline SVG icons stay small */
 svg.ico,svg.icon-svg{width:22px;height:22px;vertical-align:middle}
 .btn svg.ico,.btn svg.icon-svg{width:18px;height:18px}
-
-/* Ensure all inline SVG icons stay small */
-svg.ico{width:22px;height:22px;vertical-align:middle}
-.btn svg.ico{width:18px;height:18px}
 .otp{letter-spacing:.5em;text-align:center;font-size:22px;font-weight:700}
 .linkbtn{background:none;border:0;color:var(--brand);font-weight:700;cursor:pointer;padding:6px 0}
 .err-text{color:var(--bad);font-size:13px;margin-top:8px;min-height:18px}

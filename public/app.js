@@ -378,12 +378,14 @@ async function pageHome() {
 
 async function pageSend() {
   const contacts = (await api('/api/contacts')).contacts || [];
+  /* The datalist id must NOT be "clist": app.css styles `.main #clist` as the contacts-page grid,
+     which forced this datalist to render as visible page content. */
   $('#main').innerHTML = `
   <div class="card"><h3>Send email now</h3>
   <form id="f">
     <label>To</label>
-    <input name="recipient" type="email" list="clist" placeholder="friend@example.com" required>
-    <datalist id="clist">${contacts.map((c) => `<option value="${esc(c.email)}">${esc(c.name)}</option>`).join('')}</datalist>
+    <input name="recipient" type="email" list="contact-options" placeholder="friend@example.com" required>
+    <datalist id="contact-options">${contacts.map((c) => `<option value="${esc(c.email)}">${esc(c.name)}</option>`).join('')}</datalist>
     <label>Recipient name (optional)</label><input name="recipient_name" maxlength="80" placeholder="For {name} variable">
     <label>Subject</label><input name="subject" maxlength="200" placeholder="Subject line" required>
     <label>Message</label><textarea name="message" rows="6" maxlength="5000" placeholder="You can use {name}, {sender}, {year}" required></textarea>
