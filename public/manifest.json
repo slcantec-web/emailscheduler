@@ -1,14 +1,17 @@
 {
   "name": "Email Scheduler",
   "short_name": "Email Sched",
-  "description": "Schedule emails, daily/weekly/monthly reminders, birthdays and anniversaries. Works on phone and PC.",
+  "description": "Send emails now or schedule daily, weekly, monthly and yearly reminders. Birthday and anniversary greetings. Install on phone or PC.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#f4f5fb",
   "theme_color": "#5b4bff",
-  "categories": ["productivity", "utilities"],
+  "categories": [
+    "productivity",
+    "utilities"
+  ],
   "icons": [
     {
       "src": "/icon.svg",
