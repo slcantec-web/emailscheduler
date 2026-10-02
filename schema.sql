@@ -1,4 +1,3 @@
--- Scheduled Email Gateway - D1 schema (all times are unix epoch seconds, UTC)
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT NOT NULL UNIQUE,
@@ -13,9 +12,6 @@ CREATE TABLE IF NOT EXISTS users (
   updated_at INTEGER NOT NULL,
   last_login_at INTEGER
 );
-
--- If upgrading an existing DB that already has users without schedule_limit:
--- ALTER TABLE users ADD COLUMN schedule_limit INTEGER;
 
 CREATE TABLE IF NOT EXISTS sessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +64,6 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
   schedule_type TEXT NOT NULL CHECK (schedule_type IN ('ONE_TIME','DAILY','WEEKLY','MONTHLY','YEARLY','BIRTHDAY','ANNIVERSARY')),
-  -- Upgrade existing DB: recreate table or drop CHECK if needed. New installs get full types.
   recipient_email TEXT NOT NULL,
   recipient_name TEXT,
   subject_template TEXT NOT NULL DEFAULT '',
