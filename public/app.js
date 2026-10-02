@@ -274,9 +274,30 @@ function panelHtmlFor(view, extra) {
   return loginPanelHtml();
 }
 
+/* PC split login: details on one half, form on the other. Sign-up flow swaps the halves;
+   log in / forgot / reset keep the form on the right. */
+const formOnLeft = (view, extra) => view === 'signup' || (view === 'otp' && extra && extra.mode === 'register');
+function swapSides(wrap, wantLeft, animate) {
+  const els = [$('.authtop', wrap), $('.authcard', wrap)];
+  const before = els.map((el) => el.getBoundingClientRect().left);
+  wrap.classList.toggle('swap', wantLeft);
+  if (!animate || !els[0].animate || (window.matchMedia && window.matchMedia('(prefers-reduced-motion:reduce)').matches)) return;
+  els.forEach((el, i) => {
+    const dx = before[i] - el.getBoundingClientRect().left;
+    if (dx) el.animate([{ transform: `translateX(${dx}px)` }, { transform: 'translateX(0)' }], { duration: 520, easing: 'cubic-bezier(.22,1,.36,1)' });
+  });
+}
 function authGo(view, extra, animate = true) {
   const b = $('#authbody');
   if (!b || authBusy) return;
+  const wrap = $('.authwrap');
+  if (wrap) {
+    const wantLeft = formOnLeft(view, extra);
+    if (wrap.classList.contains('swap') !== wantLeft) {
+      const wide = window.matchMedia && window.matchMedia('(min-width:900px)').matches;
+      swapSides(wrap, wantLeft, wide && animate);
+    }
+  }
   const dir = (view === 'login' || (authView === 'signup' && view === 'login')) ? 'left' : 'right';
   const stage = $('#auth-stage', b) || b;
   const panel = $('#auth-panel', b);

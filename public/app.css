@@ -398,3 +398,20 @@ a.tile:active{transform:scale(.98)}
   .auth-features,.auth-howto{display:none}
   .authcard{margin-top:-14px;padding-top:16px}
 }
+
+/* ---------- PC login: 50/50 split, halves swap for sign up ---------- */
+@media (min-width:900px){
+  .authwrap{flex-direction:row;flex-wrap:nowrap;gap:0;padding:0;justify-content:stretch;align-items:stretch;min-height:100dvh;overflow-x:hidden;background:var(--card)}
+  .authwrap.swap{flex-direction:row-reverse}
+  .authtop{flex:1 1 50%;width:50%;max-width:none;margin:0;text-align:left;display:flex;flex-direction:column;justify-content:center;background:var(--grad);padding:56px max(48px,calc((50vw - 460px) / 2));position:relative;z-index:1}
+  .authtop .logo{margin:0 0 18px;width:72px;height:72px;border-radius:22px}
+  .authtop h1{font-size:36px}
+  .authtop .tagline{font-size:16px;margin-top:10px}
+  .auth-features{margin:28px 0 20px;gap:12px}
+  .af{padding:12px 14px}
+  .auth-howto{font-size:13.5px;padding:12px 14px}
+  .authcard{flex:1 1 50%;width:50%;min-height:100dvh;margin:0;border-radius:0;box-shadow:none;background:var(--card);display:flex;flex-direction:row;align-items:center;justify-content:center;padding:48px;position:relative;z-index:2}
+  .authcard>div{flex:none;display:block;width:100%;max-width:420px;margin:0}
+  .auth-stage{flex:none;min-height:0;overflow:visible}
+  .auth-panel{position:relative;inset:auto;overflow:visible}
+}
