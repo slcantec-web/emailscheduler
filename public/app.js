@@ -109,33 +109,104 @@ function renderAuth() {
   authLogin();
 }
 const emailField = (v = '') => `<label>Email address</label><input name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" value="${esc(v)}" required>`;
-function authLogin() {
-  const b = $('#authbody');
-  b.innerHTML = `
-  <div class="tabs"><button class="on">Log in</button><button id="to-reg">Sign up</button></div>
+
+function authTabs(active) {
+  return `<div class="tabs">
+    <button type="button" class="${active === 'login' ? 'on' : ''}" data-auth-tab="login">Log in</button>
+    <button type="button" class="${active === 'signup' ? 'on' : ''}" data-auth-tab="signup">Sign up</button>
+  </div>`;
+}
+
+function loginPanelHtml() {
+  return `
   <p class="auth-lead">Welcome back. Enter your email and password to continue.</p>
   <form id="f">
     ${emailField()}
     <label>Password</label><input name="password" type="password" autocomplete="current-password" required>
     <button class="btn block">Log in</button>
   </form>
-  <div class="row" style="justify-content:center;margin-top:12px"><button class="linkbtn" id="forgot">Forgot password?</button></div>
+  <div class="row" style="justify-content:center;margin-top:12px"><button type="button" class="linkbtn" id="forgot">Forgot password?</button></div>
   <div class="auth-foot muted small">New here? Tap <strong>Sign up</strong> — we’ll send a one-time code to your email.</div>`;
-  $('#to-reg').onclick = authRegister1; $('#forgot').onclick = authForgot1;
-  $('#f').onsubmit = (e) => { e.preventDefault(); withBtn($('.btn', b), async () => { const d = await api('/api/auth/login', 'POST', fd(e.target)); me = d.user; boot(); }); };
 }
-function authRegister1() {
-  const b = $('#authbody');
-  b.innerHTML = `
-  <div class="tabs"><button id="to-login">Log in</button><button class="on">Sign up</button></div>
+
+function signupPanelHtml() {
+  return `
   <p class="auth-lead">Create a free account. We’ll send a 6-digit code to verify your email.</p>
   <form id="f">
     ${emailField()}
     <p class="hint">Use an email you can access — the code arrives in a few seconds.</p>
     <button class="btn block">Send verification code</button>
-  </form>`;
-  $('#to-login').onclick = authLogin;
-  $('#f').onsubmit = (e) => { e.preventDefault(); const d = fd(e.target); withBtn($('.btn', b), async () => { await api('/api/auth/register/request', 'POST', d); authOtp(d.email, 'register'); }); };
+  </form>
+  <div class="auth-foot muted small">Already have an account? Tap <strong>Log in</strong>.</div>`;
+}
+
+function bindAuthTabs(active) {
+  $$('[data-auth-tab]').forEach((btn) => {
+    btn.onclick = () => {
+      const tab = btn.dataset.authTab;
+      if (tab === active) return;
+      if (tab === 'login') authShowTab('login');
+      else authShowTab('signup');
+    };
+  });
+}
+
+function bindLoginForm() {
+  const b = $('#authbody');
+  const forgot = $('#forgot');
+  if (forgot) forgot.onclick = authForgot1;
+  const form = $('#f', b);
+  if (form) form.onsubmit = (e) => {
+    e.preventDefault();
+    withBtn($('.btn', form), async () => {
+      const d = await api('/api/auth/login', 'POST', fd(e.target));
+      me = d.user;
+      boot();
+    });
+  };
+}
+
+function bindSignupForm() {
+  const form = $('#f');
+  if (form) form.onsubmit = (e) => {
+    e.preventDefault();
+    const d = fd(e.target);
+    withBtn($('.btn', form), async () => {
+      await api('/api/auth/register/request', 'POST', d);
+      authOtp(d.email, 'register');
+    });
+  };
+}
+
+function authShowTab(tab, animate = true) {
+  const b = $('#authbody');
+  if (!b) return;
+  const panel = $('#auth-panel', b);
+  const html = tab === 'login' ? loginPanelHtml() : signupPanelHtml();
+  const apply = () => {
+    b.innerHTML = `${authTabs(tab)}<div id="auth-panel" class="auth-panel auth-panel-in">${html}</div>`;
+    bindAuthTabs(tab);
+    if (tab === 'login') bindLoginForm();
+    else bindSignupForm();
+  };
+  if (!animate || !panel) {
+    apply();
+    return;
+  }
+  panel.classList.remove('auth-panel-in');
+  panel.classList.add('auth-panel-out');
+  setTimeout(apply, 180);
+}
+
+function authLogin() {
+  const b = $('#authbody');
+  b.innerHTML = `${authTabs('login')}<div id="auth-panel" class="auth-panel auth-panel-in">${loginPanelHtml()}</div>`;
+  bindAuthTabs('login');
+  bindLoginForm();
+}
+
+function authRegister1() {
+  authShowTab('signup', true);
 }
 function authOtp(email, mode) {
   const b = $('#authbody');
