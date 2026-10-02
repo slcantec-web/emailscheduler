@@ -67,7 +67,25 @@ async function withBtn(btn, fn) {
 }
 const fd = (f) => Object.fromEntries(new FormData(f));
 const statusBadge = (s) => `<span class="badge ${{ SENT: 'ok', ACTIVE: 'ok', COMPLETED: 'ok', FAILED: 'bad', CANCELLED: 'bad', PENDING: 'warn', PROCESSING: 'warn', SCHEDULED: 'warn', RUNNING: 'warn' }[s] || ''}">${esc(s)}</span>`;
-const TYPE_LABEL = { ONE_TIME: 'One-time', BIRTHDAY: 'Birthday', ANNIVERSARY: 'Anniversary', CUSTOM_RECURRING: 'Yearly' };
+const TYPE_LABEL = {
+  ONE_TIME: 'One-time',
+  DAILY: 'Daily',
+  WEEKLY: 'Weekly',
+  MONTHLY: 'Monthly',
+  YEARLY: 'Yearly',
+  BIRTHDAY: 'Birthday',
+  ANNIVERSARY: 'Anniversary',
+};
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function scheduleRuleLabel(s) {
+  const t = s.schedule_type, r = s.recurrence_rule, tm = s.send_time || '';
+  if (t === 'ONE_TIME') return 'Once';
+  if (t === 'DAILY') return `Every day at ${tm}`;
+  if (t === 'WEEKLY') return `Every ${WEEKDAYS[Number(r)] || r} at ${tm}`;
+  if (t === 'MONTHLY') return `Day ${r} each month at ${tm}`;
+  if (t === 'YEARLY' || t === 'BIRTHDAY' || t === 'ANNIVERSARY') return `${r || ''} each year at ${tm}`.trim();
+  return tm ? `at ${tm}` : '';
+}
 const loading = () => '<div class="splash" style="min-height:40dvh"><div class="spinner"></div></div>';
 
 /* ---------- auth screens ---------- */
@@ -245,7 +263,7 @@ async function pageSchedules() {
       <div class="muted small">${esc(s.recipient_name || '')} · ${esc(s.recipient_email)}</div>
       <div class="small" style="margin-top:4px"><strong>${esc(s.subject_template || 'Reminder')}</strong></div>
       <div class="muted small">${esc((s.message_template || '').slice(0, 80))}${(s.message_template || '').length > 80 ? '…' : ''}</div>
-      <div class="muted small" style="margin-top:6px">Next: ${fmtDT(s.next_run_at)}</div>
+      <div class="muted small" style="margin-top:6px">${scheduleRuleLabel(s)} · Next: ${fmtDT(s.next_run_at)}</div>
       ${['PENDING', 'ACTIVE'].includes(s.status) ? `<div class="row" style="margin-top:8px"><button class="btn ghost danger smallbtn" data-cancel="${s.id}">Cancel</button></div>` : ''}
     </div>`).join('') : '<div class="card muted">No schedules yet.</div>'}</div>`;
   $('#add').onclick = () => scheduleForm();
@@ -257,23 +275,57 @@ async function pageSchedules() {
 function scheduleForm() {
   modal(`<h3>New schedule</h3>
   <form id="sf">
-    <label>Type</label>
-    <select name="schedule_type"><option value="ONE_TIME">One-time</option><option value="BIRTHDAY">Birthday (yearly)</option><option value="ANNIVERSARY">Anniversary (yearly)</option></select>
+    <label>Repeat</label>
+    <select name="schedule_type" id="stype">
+      <option value="ONE_TIME">One-time (specific date)</option>
+      <option value="DAILY">Every day</option>
+      <option value="WEEKLY">Every week</option>
+      <option value="MONTHLY">Every month</option>
+      <option value="YEARLY">Every year</option>
+      <option value="BIRTHDAY">Birthday (yearly)</option>
+      <option value="ANNIVERSARY">Anniversary (yearly)</option>
+    </select>
+    <div id="when-fields"></div>
     <label>Recipient email</label><input name="recipient" type="email" required>
     <label>Recipient name</label><input name="recipient_name" maxlength="80">
     <label>Subject</label><input name="subject" maxlength="200" value="Reminder" required>
     <label>Message</label><textarea name="message" rows="4" required placeholder="Hi {name}! ..."></textarea>
-    <label>Date</label><input name="date" type="date" value="${slDate(1)}">
-    <p class="hint">For birthday/anniversary use MM-DD (e.g. 04-18) or pick a date — day & month are used yearly.</p>
     <label>Time (Colombo, Sri Lanka UTC+5:30)</label><input name="time" type="time" value="08:00" required>
-    <p class="hint">All schedule times are interpreted in Asia/Colombo (+5:30).</p>
+    <p class="hint">All times use Asia/Colombo (+5:30).</p>
     <label>From name</label><input name="sender_name" maxlength="60" placeholder="${esc(me.sender_name || '')}">
     <button class="btn block" style="margin-top:12px">Schedule</button>
   </form>`, (sheet, close) => {
+    const when = $('#when-fields', sheet);
+    const renderWhen = () => {
+      const t = $('#stype', sheet).value;
+      if (t === 'ONE_TIME') {
+        when.innerHTML = `<label>Date</label><input name="date" type="date" value="${slDate(1)}" required>
+          <p class="hint">Sends once on this date at the time below.</p>`;
+      } else if (t === 'DAILY') {
+        when.innerHTML = `<p class="hint">Sends every day at the time below.</p><input type="hidden" name="date" value="">`;
+      } else if (t === 'WEEKLY') {
+        when.innerHTML = `<label>Day of week</label>
+          <select name="weekday">${WEEKDAYS.map((n, i) => `<option value="${i}">${n}</option>`).join('')}</select>
+          <p class="hint">Sends every week on this day.</p>`;
+      } else if (t === 'MONTHLY') {
+        when.innerHTML = `<label>Day of month</label>
+          <select name="day_of_month">${Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('')}</select>
+          <p class="hint">Sends on this day each month (shorter months use the last day).</p>`;
+      } else {
+        when.innerHTML = `<label>Date each year</label><input name="date" type="date" value="${slDate(0)}" required>
+          <p class="hint">Only month & day are used — repeats every year.</p>`;
+      }
+    };
+    $('#stype', sheet).onchange = renderWhen;
+    renderWhen();
     $('#sf', sheet).onsubmit = (e) => {
       e.preventDefault();
       const d = fd(e.target);
-      if (d.schedule_type !== 'ONE_TIME' && d.date && d.date.length === 10) d.date = d.date.slice(5); // YYYY-MM-DD -> MM-DD
+      if (['YEARLY', 'BIRTHDAY', 'ANNIVERSARY'].includes(d.schedule_type) && d.date && d.date.length === 10) {
+        d.date = d.date.slice(5); // YYYY-MM-DD → MM-DD
+      }
+      if (d.weekday != null) d.weekday = Number(d.weekday);
+      if (d.day_of_month != null) d.day_of_month = Number(d.day_of_month);
       withBtn($('.btn', e.target), async () => {
         await api('/api/schedules', 'POST', d);
         toast('Scheduled!', 'good');

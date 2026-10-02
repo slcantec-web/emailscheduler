@@ -80,6 +80,51 @@ function nextYearly(mmdd, hhmm, after) {
   }
   return null;
 }
+/** Next daily run after `after` at hh:mm Colombo */
+function nextDaily(hhmm, after) {
+  for (let i = 0; i < 3; i++) {
+    const parts = colomboParts(after + i * 86400);
+    const e = toEpoch(`${parts.y}-${String(parts.m).padStart(2, '0')}-${String(parts.d).padStart(2, '0')}`, hhmm);
+    if (e && e > after) return e;
+  }
+  return null;
+}
+/** weekday: 0=Sun … 6=Sat (Colombo) */
+function nextWeekly(weekday, hhmm, after) {
+  const wd = Number(weekday);
+  for (let i = 0; i < 14; i++) {
+    const parts = colomboParts(after + i * 86400);
+    const dateStr = `${parts.y}-${String(parts.m).padStart(2, '0')}-${String(parts.d).padStart(2, '0')}`;
+    const noon = toEpoch(dateStr, '12:00');
+    if (noon == null) continue;
+    const jsDay = new Date((noon + TZ_OFFSET) * 1000).getUTCDay(); // 0=Sun
+    if (jsDay !== wd) continue;
+    const e = toEpoch(dateStr, hhmm);
+    if (e && e > after) return e;
+  }
+  return null;
+}
+/** dayOfMonth 1–31; clamps to last day of month */
+function nextMonthly(dayOfMonth, hhmm, after) {
+  const dom = Math.min(31, Math.max(1, Number(dayOfMonth)));
+  const start = colomboParts(after);
+  for (let i = 0; i < 14; i++) {
+    let y = start.y, m = start.m + i;
+    while (m > 12) { m -= 12; y += 1; }
+    const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    const day = Math.min(dom, lastDay);
+    const e = toEpoch(`${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`, hhmm);
+    if (e && e > after) return e;
+  }
+  return null;
+}
+function computeNextRun(type, rule, hhmm, after) {
+  if (type === 'DAILY') return nextDaily(hhmm, after);
+  if (type === 'WEEKLY') return nextWeekly(rule, hhmm, after);
+  if (type === 'MONTHLY') return nextMonthly(rule, hhmm, after);
+  if (type === 'YEARLY' || type === 'BIRTHDAY' || type === 'ANNIVERSARY') return nextYearly(rule, hhmm, after);
+  return null;
+}
 const validMMDD = (s) => /^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(s) && toEpoch(`2024-${s}`, '00:00') !== null;
 function toMMDD(v) {
   if (!v) return null;
@@ -235,7 +280,8 @@ const needEmail = (b) => { const e = normalizeEmail(b.email); if (!e) throw new 
 /* ---------- schedules ---------- */
 async function buildSchedule(env, user, settings, b) {
   const type = b.schedule_type;
-  if (!['ONE_TIME', 'BIRTHDAY', 'ANNIVERSARY', 'CUSTOM_RECURRING'].includes(type)) throw new ApiError('INVALID_TYPE', 'Invalid schedule type.');
+  const ALLOWED = ['ONE_TIME', 'DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY', 'BIRTHDAY', 'ANNIVERSARY'];
+  if (!ALLOWED.includes(type)) throw new ApiError('INVALID_TYPE', 'Invalid schedule type.');
   const message = clean(b.message, MAX_MSG + 1);
   validateTemplate(message);
   const subject = clean(b.subject || 'Reminder', MAX_SUBJECT + 1);
@@ -253,20 +299,43 @@ async function buildSchedule(env, user, settings, b) {
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new ApiError('INVALID_TIME', 'Enter a valid time (HH:MM).');
   const sender = resolveSender(settings, user, b.sender_name);
   const f = { type, recipient, name, contactId, message, subject, sender, time };
+  const t = now();
+
   if (type === 'ONE_TIME') {
     const at = toEpoch(clean(b.date, 10), time);
     if (!at) throw new ApiError('INVALID_DATE', 'Enter a valid date.');
-    if (at <= now() + 30) throw new ApiError('PAST_DATE', 'Schedule time must be in the future (Sri Lanka time).');
+    if (at <= t + 30) throw new ApiError('PAST_DATE', 'Schedule time must be in the future (Sri Lanka time).');
     Object.assign(f, { scheduledAt: at, nextRun: at, rule: null, status: 'PENDING' });
+  } else if (type === 'DAILY') {
+    const next = nextDaily(time, t);
+    if (!next) throw new ApiError('INVALID_DATE', 'Could not compute next daily run.');
+    Object.assign(f, { scheduledAt: null, nextRun: next, rule: 'daily', status: 'ACTIVE' });
+  } else if (type === 'WEEKLY') {
+    // weekday: 0=Sun … 6=Sat, or accept Mon/Tue/…
+    let wd = b.weekday != null ? b.weekday : b.date;
+    const map = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+    if (typeof wd === 'string' && map[wd.toLowerCase().slice(0, 3)] != null) wd = map[wd.toLowerCase().slice(0, 3)];
+    wd = Number(wd);
+    if (!Number.isInteger(wd) || wd < 0 || wd > 6) throw new ApiError('INVALID_DATE', 'Choose a weekday (0=Sun … 6=Sat).');
+    const next = nextWeekly(wd, time, t);
+    if (!next) throw new ApiError('INVALID_DATE', 'Could not compute next weekly run.');
+    Object.assign(f, { scheduledAt: null, nextRun: next, rule: String(wd), status: 'ACTIVE' });
+  } else if (type === 'MONTHLY') {
+    let day = Number(b.day_of_month != null ? b.day_of_month : (clean(b.date, 10).match(/(\d{1,2})$/) || [])[1]);
+    if (!Number.isInteger(day) || day < 1 || day > 31) throw new ApiError('INVALID_DATE', 'Choose a day of month (1–31).');
+    const next = nextMonthly(day, time, t);
+    if (!next) throw new ApiError('INVALID_DATE', 'Could not compute next monthly run.');
+    Object.assign(f, { scheduledAt: null, nextRun: next, rule: String(day), status: 'ACTIVE' });
   } else {
+    // YEARLY / BIRTHDAY / ANNIVERSARY
     let mmdd = toMMDD(clean(b.date, 10));
     if (mmdd === null || mmdd === undefined) {
       if (contact) mmdd = type === 'BIRTHDAY' ? contact.birthday : type === 'ANNIVERSARY' ? contact.anniversary : null;
     }
-    if (!mmdd) throw new ApiError('INVALID_DATE', 'Choose the date to repeat every year.');
+    if (!mmdd) throw new ApiError('INVALID_DATE', 'Choose the date to repeat every year (MM-DD).');
     if (mmdd === false) throw new ApiError('INVALID_DATE', 'Enter a valid MM-DD date.');
-    const next = nextYearly(mmdd, time, now());
-    if (!next) throw new ApiError('INVALID_DATE', 'Could not compute next run date.');
+    const next = nextYearly(mmdd, time, t);
+    if (!next) throw new ApiError('INVALID_DATE', 'Could not compute next yearly run.');
     Object.assign(f, { scheduledAt: null, nextRun: next, rule: mmdd, status: 'ACTIVE' });
   }
   return f;
@@ -675,7 +744,7 @@ async function processSchedules(env, settings) {
         await env.DB.prepare('UPDATE scheduled_messages SET status=?, last_run_at=?, last_error=?, updated_at=? WHERE id=?')
           .bind(r.ok ? 'SENT' : 'FAILED', t, r.ok ? null : r.message, t, s.id).run();
       } else {
-        const next = nextYearly(s.recurrence_rule, s.send_time || '08:00', t);
+        const next = computeNextRun(s.schedule_type, s.recurrence_rule, s.send_time || '08:00', t);
         await env.DB.prepare('UPDATE scheduled_messages SET status=?, next_run_at=?, last_run_at=?, last_error=?, updated_at=? WHERE id=?')
           .bind(r.ok ? 'ACTIVE' : 'FAILED', next, t, r.ok ? null : r.message, t, s.id).run();
       }
