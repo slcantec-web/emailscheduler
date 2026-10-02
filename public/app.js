@@ -271,7 +271,9 @@ function authGo(view, extra, animate = true) {
   authBusy = true;
   panel.classList.remove('auth-in', 'auth-in-left', 'auth-in-right');
   panel.classList.add('auth-out', dir === 'left' ? 'auth-out-left' : 'auth-out-right');
-  setTimeout(mount, 220);
+  /* Match CSS authOut duration (160ms desktop / ~120ms touch) */
+  const outMs = (window.matchMedia && window.matchMedia('(hover:none) and (pointer:coarse)').matches) ? 130 : 170;
+  setTimeout(mount, outMs);
 }
 
 function authLogin() {
@@ -533,12 +535,12 @@ async function pageHistory() {
   const list = data.logs || [];
   $('#main').innerHTML = `
   <h2 style="font-size:18px;margin-bottom:12px">Email history</h2>
-  ${list.length ? list.map((l) => `
+  <div class="list">${list.length ? list.map((l) => `
     <div class="card item">
       <div class="row"><strong>${esc(l.subject_preview || '(no subject)')}</strong> ${statusBadge(l.status)}</div>
       <div class="muted small">To: ${esc(l.recipient_email)} · ${esc(l.message_type)} · ${fmtDT(l.created_at)}</div>
       ${l.error_message ? `<div class="small" style="color:var(--bad)">${esc(l.error_message)}</div>` : ''}
-    </div>`).join('') : '<div class="card muted">No emails yet.</div>'}`;
+    </div>`).join('') : '<div class="card muted">No emails yet.</div>'}</div>`;
 }
 
 async function pageTemplates() {
@@ -547,13 +549,13 @@ async function pageTemplates() {
   $('#main').innerHTML = `
   <div class="row" style="margin-bottom:12px"><h2 style="font-size:18px">Templates</h2>
   <button class="btn right" id="add">+ New</button></div>
-  ${list.length ? list.map((t) => `
+  <div class="list">${list.length ? list.map((t) => `
     <div class="card item">
       <div class="row"><strong>${esc(t.template_name)}</strong>
         <button class="linkbtn right" data-del="${t.id}">Delete</button></div>
       <div class="muted small">${esc(t.subject_body || '')}</div>
       <div class="small">${esc((t.message_body || '').slice(0, 100))}</div>
-    </div>`).join('') : '<div class="card muted">No templates yet.</div>'}`;
+    </div>`).join('') : '<div class="card muted">No templates yet.</div>'}</div>`;
   $('#add').onclick = () => {
     modal(`<h3>New template</h3>
     <form id="tf"><label>Name</label><input name="template_name" required>

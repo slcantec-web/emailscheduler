@@ -29,6 +29,10 @@ button,input,select,textarea{font:inherit;color:inherit}
 .topbar .sub{font-size:11.5px;opacity:.85;display:block;font-weight:500}
 .topbar .who{margin-left:auto;display:flex;align-items:center;gap:10px}
 .avatar{width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.22);display:grid;place-items:center;font-weight:700;border:0;color:#fff;cursor:pointer}
+@media (min-width:900px){
+  .topbar{padding-left:20px;padding-right:24px;gap:14px}
+  .topbar h1{font-size:18px}
+}
 
 /* ---------- layout ---------- */
 .shell{padding-top:calc(var(--hdr) + var(--safe-t))}
@@ -41,14 +45,41 @@ button,input,select,textarea{font:inherit;color:inherit}
 .bottomnav .on svg{filter:drop-shadow(0 2px 6px rgba(91,75,255,.4))}
 @media (min-width:900px){
   .bottomnav{display:none}
-  .sidebar{display:block;position:fixed;top:calc(var(--hdr) + var(--safe-t));bottom:0;left:0;width:240px;padding:18px 12px;background:var(--card);border-right:1px solid var(--line);overflow-y:auto}
-  .sidebar a{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:12px;color:var(--text);font-weight:600;margin-bottom:4px}
-  .sidebar a svg{width:20px;height:20px;color:var(--muted)}
+  .sidebar{display:block;position:fixed;top:calc(var(--hdr) + var(--safe-t));bottom:0;left:0;width:220px;padding:16px 10px;background:var(--card);border-right:1px solid var(--line);overflow-y:auto}
+  .sidebar a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:11px;color:var(--text);font-weight:600;margin-bottom:2px;font-size:14px}
+  .sidebar a svg{width:18px;height:18px;color:var(--muted);flex:none}
   .sidebar a:hover{background:var(--bg)}
   .sidebar a.on{background:var(--grad);color:#fff}.sidebar a.on svg{color:#fff}
-  .sidebar .sec{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:16px 14px 6px;font-weight:700}
-  .main{margin-left:240px;max-width:none;padding:26px 32px 40px}
-  .main>*{max-width:900px}
+  .sidebar .sec{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:14px 12px 4px;font-weight:700}
+  /* Full-width content area — use the whole screen past the sidebar */
+  .main{margin-left:220px;max-width:none;padding:24px 28px 40px;width:calc(100% - 220px)}
+  .main>*{max-width:none}
+  /* Organised multi-column helpers on large screens */
+  .main .grid2{grid-template-columns:repeat(2,1fr);gap:16px}
+  .main .stats{grid-template-columns:repeat(4,1fr);gap:14px}
+  .main .list,
+  .main #clist,
+  .main #slist{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px}
+  .main .list .card.item,.main .list .item,
+  .main #clist .card.item,.main #slist .card.item{margin-bottom:0}
+  .main .page-title{margin-bottom:18px}
+  .main .card{padding:18px}
+  /* Forms stay single column even on wide screens */
+  .main form .grid2{grid-template-columns:1fr 1fr}
+}
+@media (min-width:1200px){
+  .sidebar{width:240px;padding:18px 12px}
+  .main{margin-left:240px;width:calc(100% - 240px);padding:28px 36px 48px}
+  .main .list,
+  .main #clist,
+  .main #slist{grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px}
+  .main .grid2{gap:18px}
+}
+@media (min-width:1600px){
+  .main{padding:32px 48px 56px}
+  .main .list,
+  .main #clist,
+  .main #slist{grid-template-columns:repeat(auto-fill,minmax(380px,1fr))}
 }
 
 /* ---------- components ---------- */
@@ -169,54 +200,68 @@ textarea{min-height:110px;resize:vertical}
 .auth-foot{text-align:center;margin-top:auto;padding-top:12px;line-height:1.4}
 .auth-spacer{flex:1;min-height:12px}
 .tabs-single button{cursor:default}
-/* Fixed stage height — same for login / signup / forgot / otp */
+/* Auth stage — flexible height on mobile to avoid cramped/laggy fixed box */
 .auth-stage{
-  height:340px;
+  min-height:280px;
   position:relative;
   overflow:hidden;
 }
 .auth-panel{
-  position:absolute;
-  inset:0;
+  position:relative;
   display:flex;
   flex-direction:column;
   overflow-y:auto;
   -webkit-overflow-scrolling:touch;
   padding-bottom:4px;
+  will-change:transform,opacity;
 }
-.auth-in{animation:authIn .42s cubic-bezier(.16,1,.3,1) both}
-.auth-in-left{--ax:-28px}
-.auth-in-right{--ax:28px}
-.auth-out{animation:authOut .22s cubic-bezier(.4,0,1,1) both;pointer-events:none}
-.auth-out-left{--ax:-24px}
-.auth-out-right{--ax:24px}
+/* Lightweight slide — no blur/scale (blur is laggy on many mobiles) */
+.auth-in{animation:authIn .28s cubic-bezier(.22,1,.36,1) both}
+.auth-in-left{--ax:-18px}
+.auth-in-right{--ax:18px}
+.auth-out{animation:authOut .16s ease-in both;pointer-events:none}
+.auth-out-left{--ax:-14px}
+.auth-out-right{--ax:14px}
 @keyframes authIn{
-  0%{opacity:0;transform:translateX(var(--ax,20px)) scale(.94);filter:blur(6px)}
-  60%{opacity:1;filter:blur(0)}
-  100%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}
+  0%{opacity:0;transform:translate3d(var(--ax,16px),0,0)}
+  100%{opacity:1;transform:translate3d(0,0,0)}
 }
 @keyframes authOut{
-  0%{opacity:1;transform:translateX(0) scale(1);filter:blur(0)}
-  100%{opacity:0;transform:translateX(var(--ax,16px)) scale(.96);filter:blur(4px)}
+  0%{opacity:1;transform:translate3d(0,0,0)}
+  100%{opacity:0;transform:translate3d(var(--ax,12px),0,0)}
 }
 @media (prefers-reduced-motion:reduce){
   .auth-in,.auth-out{animation:none}
+}
+/* On touch / coarse pointer devices, keep motion even lighter */
+@media (hover:none) and (pointer:coarse){
+  .auth-in{animation-duration:.2s}
+  .auth-out{animation-duration:.12s}
+  .auth-in-left,.auth-out-left{--ax:-10px}
+  .auth-in-right,.auth-out-right{--ax:10px}
 }
 @media (min-width:640px){
   .authwrap{justify-content:center;align-items:center;padding:32px 24px;flex-direction:row;gap:40px;flex-wrap:wrap}
   .authtop{padding:0;text-align:left;max-width:380px;margin:0}
   .authtop .logo{margin:0 0 14px}
   .auth-features{margin:18px 0}
-  .authcard{border-radius:24px;flex:none;width:420px;height:480px;margin:0;box-shadow:0 30px 80px rgba(0,0,0,.28);display:flex;flex-direction:column}
+  .authcard{border-radius:24px;flex:none;width:420px;min-height:480px;height:auto;margin:0;box-shadow:0 30px 80px rgba(0,0,0,.28);display:flex;flex-direction:column}
   .authcard>div{flex:1;display:flex;flex-direction:column}
-  .auth-stage{height:380px;flex:1}
+  .auth-stage{min-height:360px;flex:1}
+  .auth-panel{position:absolute;inset:0}
 }
 @media (max-width:639px){
-  .auth-stage{height:360px}
+  .auth-stage{min-height:0}
+  .authcard{padding-top:18px}
+  .authtop{padding:calc(20px + var(--safe-t)) 16px 36px}
+  .auth-features{gap:8px;margin:14px 0 10px}
+  .af{padding:8px 10px}
+  .auth-howto{font-size:12px;padding:8px 10px}
 }
 @media (max-width:420px){
   .auth-features{grid-template-columns:1fr}
-  .authtop h1{font-size:24px}
+  .authtop h1{font-size:22px}
+  .authtop .tagline{font-size:14px}
 }
 
 /* Ensure all inline SVG icons stay small */
