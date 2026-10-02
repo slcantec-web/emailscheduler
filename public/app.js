@@ -305,20 +305,20 @@ function shell(title, sub) {
     { id: 'contacts', label: 'Contacts', icon: 'users' },
     { id: 'more', label: 'More', icon: 'more' },
   ];
-  const sideExtra = [
-    { id: 'history', label: 'History', icon: 'list' },
-    { id: 'templates', label: 'Templates', icon: 'file' },
-    { id: 'profile', label: 'Profile', icon: 'user' },
+  const groups = [
+    { t: 'Main', items: nav.slice(0, 4) },
+    { t: 'Tools', items: [{ id: 'history', label: 'History', icon: 'list' }, { id: 'templates', label: 'Templates', icon: 'file' }] },
+    { t: 'Account', items: [{ id: 'profile', label: 'Profile', icon: 'user' }, { id: 'logout', label: 'Log out', icon: 'logout' }] },
   ];
-  if (isAdmin) sideExtra.push({ id: 'admin', label: 'Admin', icon: 'shield' }, { id: 'campaigns', label: 'Campaigns', icon: 'mega' }, { id: 'settings', label: 'Settings', icon: 'settings' });
-  sideExtra.push({ id: 'logout', label: 'Log out', icon: 'logout' });
+  if (isAdmin) groups.splice(2, 0, { t: 'Admin', items: [{ id: 'admin', label: 'Users', icon: 'shield' }, { id: 'campaigns', label: 'Campaigns', icon: 'mega' }, { id: 'settings', label: 'Settings', icon: 'settings' }] });
   $('#bnav').innerHTML = nav.map((n) => `<button data-nav="${n.id}">${ic(n.icon)}<span>${n.label}</span></button>`).join('');
-  $('#side').innerHTML = `<div class="sec">Menu</div>` + [...nav.slice(0, 4), ...sideExtra].map((n) => `<a href="#" data-nav="${n.id}">${ic(n.icon)}${n.label}</a>`).join('');
+  $('#side').innerHTML = groups.map((g) => `<div class="sec">${g.t}</div>` + g.items.map((n) => `<a href="#" class="${n.id === 'logout' ? 'logout' : ''}" data-nav="${n.id}">${ic(n.icon)}${n.label}</a>`).join('')).join('');
   $$('[data-nav]').forEach((el) => el.onclick = (e) => { e.preventDefault(); go(el.dataset.nav); });
   $('#avatar').onclick = () => go('profile');
 }
 function setNav(id) {
-  $$('#bnav button, #side a').forEach((el) => el.classList.toggle('on', el.dataset.nav === id || (id === 'history' && el.dataset.nav === 'more')));
+  const moreIds = ['history', 'templates', 'profile', 'admin', 'campaigns', 'settings'];
+  $$('#bnav button, #side a').forEach((el) => el.classList.toggle('on', el.dataset.nav === id || (el.dataset.nav === 'more' && moreIds.includes(id))));
 }
 async function go(id) {
   if (busyNav) return;
@@ -615,20 +615,33 @@ async function pageProfile() {
 }
 
 async function pageMore() {
-  const items = [
-    { id: 'history', label: 'Email history', icon: 'list' },
-    { id: 'templates', label: 'Templates', icon: 'file' },
-    { id: 'profile', label: 'Profile & password', icon: 'user' },
+  const groups = [
+    { title: 'Your account', items: [
+      { id: 'history', label: 'Email history', desc: 'Everything you have sent', icon: 'list', tone: 'blue' },
+      { id: 'templates', label: 'Templates', desc: 'Reusable messages', icon: 'file', tone: 'violet' },
+      { id: 'profile', label: 'Profile', desc: 'Name, From name, password', icon: 'user', tone: 'green' },
+    ] },
   ];
   if (me.role === 'ADMIN') {
-    items.push({ id: 'admin', label: 'Users (admin)', icon: 'shield' });
-    items.push({ id: 'campaigns', label: 'Campaigns', icon: 'mega' });
-    items.push({ id: 'settings', label: 'System settings', icon: 'settings' });
+    groups.push({ title: 'Admin', items: [
+      { id: 'admin', label: 'Users', desc: 'Accounts and limits', icon: 'shield', tone: 'violet' },
+      { id: 'campaigns', label: 'Campaigns', desc: 'Bulk email sends', icon: 'mega', tone: 'amber' },
+      { id: 'settings', label: 'Settings', desc: 'System limits and access', icon: 'settings', tone: 'blue' },
+    ] });
   }
-  if (!isStandalone()) items.push({ id: 'install-pwa', label: 'Install app', icon: 'home' });
-  items.push({ id: 'logout', label: 'Log out', icon: 'logout' });
-  $('#main').innerHTML = `<div class="card menu">${items.map((i) => `<a href="#" class="menuitem" data-nav="${i.id}">${ic(i.icon)}<span>${esc(i.label)}</span></a>`).join('')}</div>`;
-  $$('[data-nav]').forEach((el) => el.onclick = (e) => {
+  const app = [];
+  if (!isStandalone()) app.push({ id: 'install-pwa', label: 'Install app', desc: 'Add to your home screen', icon: 'home', tone: 'green' });
+  app.push({ id: 'logout', label: 'Log out', desc: 'End this session', icon: 'logout', tone: 'red' });
+  groups.push({ title: 'App', items: app });
+  $('#main').innerHTML = groups.map((g) => `
+    <div class="sec-title">${esc(g.title)}</div>
+    <div class="tiles">${g.items.map((i) => `
+      <a href="#" class="tile nav-tile tone-${i.tone}" data-nav="${i.id}">
+        <span class="tile-ic">${ic(i.icon)}</span>
+        <span class="tile-t">${esc(i.label)}</span>
+        <span class="tile-d">${esc(i.desc)}</span>
+      </a>`).join('')}</div>`).join('');
+  $$('[data-nav]', $('#main')).forEach((el) => el.onclick = (e) => {
     e.preventDefault();
     const id = el.dataset.nav;
     if (id === 'install-pwa') {
@@ -755,26 +768,54 @@ async function pageSettings() {
   if (me.role !== 'ADMIN') return go('home');
   const data = await api('/api/admin/settings');
   const s = data.settings || {};
-  const fields = [
-    ['max_user_scheduled_messages', 'Max active schedules per user'],
-    ['max_daily_emails', 'Max emails per day (user)'],
-    ['max_monthly_emails', 'Max emails per month (user)'],
-    ['max_contacts', 'Max contacts per user'],
-    ['max_bulk_recipients', 'Max bulk recipients'],
-    ['otp_expiry_minutes', 'OTP expiry (minutes)'],
-    ['registration_enabled', 'Registration enabled (0/1)'],
-    ['allow_custom_sender_name', 'Allow custom From name (0/1)'],
-    ['bulk_batch_size', 'Bulk batch size'],
+  const groups = [
+    { title: 'User limits', note: 'Apply to normal users only. Admin accounts have no limits.', tiles: [
+      { k: 'max_user_scheduled_messages', icon: '⏰', label: 'Active schedules', desc: 'Per user (default)', min: 0 },
+      { k: 'max_daily_emails', icon: '✉️', label: 'Emails per day', desc: 'Per user', min: 0 },
+      { k: 'max_monthly_emails', icon: '📅', label: 'Emails per month', desc: 'Per user', min: 0 },
+      { k: 'max_contacts', icon: '👥', label: 'Contacts', desc: 'Per user', min: 0 },
+    ] },
+    { title: 'Access', tiles: [
+      { k: 'registration_enabled', icon: '🟢', label: 'Registration', desc: 'Allow new sign-ups', toggle: true },
+      { k: 'allow_custom_sender_name', icon: '✍️', label: 'Custom From name', desc: 'Let users set their own', toggle: true },
+    ] },
+    { title: 'Security', tiles: [
+      { k: 'otp_expiry_minutes', icon: '⌛', label: 'Code expiry', desc: 'Minutes a code stays valid', min: 1 },
+      { k: 'max_otp_requests', icon: '🔢', label: 'Code requests', desc: 'Per email, per hour', min: 0 },
+      { k: 'max_otp_attempts', icon: '🔑', label: 'Code attempts', desc: 'Wrong tries before lock', min: 1 },
+      { k: 'max_login_attempts', icon: '🚫', label: 'Login attempts', desc: 'Per email, per 15 minutes', min: 0 },
+    ] },
+    { title: 'Bulk sending', tiles: [
+      { k: 'max_bulk_recipients', icon: '📣', label: 'Recipients', desc: 'Max per campaign', min: 0 },
+      { k: 'bulk_batch_size', icon: '📦', label: 'Batch size', desc: 'Emails per minute (max 40)', min: 1, max: 40 },
+    ] },
   ];
+  const toggleKeys = groups.flatMap((g) => g.tiles).filter((x) => x.toggle).map((x) => x.k);
+  const tileHtml = (x) => `
+    <div class="tile setting">
+      <div class="setting-head">
+        <span class="tile-ic">${x.icon}</span>
+        <div><div class="tile-t">${esc(x.label)}</div><div class="tile-d">${esc(x.desc)}</div></div>
+      </div>
+      ${x.toggle
+        ? `<div class="switch"><span class="small muted">Off / On</span><input type="checkbox" name="${x.k}" ${Number(s[x.k]) === 1 ? 'checked' : ''}></div>`
+        : `<input name="${x.k}" type="number" min="${x.min ?? 0}" ${x.max ? `max="${x.max}"` : ''} value="${esc(s[x.k] ?? '')}">`}
+    </div>`;
   $('#main').innerHTML = `
-  <div class="card"><h3>System settings</h3>
-  <p class="muted small">These limits apply to <strong>normal users only</strong>. Admin accounts have no schedule, email, or contact limits.</p>
-  <form id="sf">${fields.map(([k, label]) => `<label>${esc(label)}</label><input name="${k}" type="number" value="${s[k] ?? ''}">`).join('')}
-  <button class="btn block" style="margin-top:12px">Save settings</button></form></div>`;
+  <h2 style="font-size:18px;margin-bottom:2px">System settings</h2>
+  <form id="sf">
+    ${groups.map((g) => `
+      <div class="sec-title">${esc(g.title)}</div>
+      ${g.note ? `<p class="muted small" style="margin:-4px 2px 10px">${esc(g.note)}</p>` : ''}
+      <div class="tiles tiles-settings">${g.tiles.map(tileHtml).join('')}</div>`).join('')}
+    <div class="savebar"><span class="muted small">Changes apply right after saving.</span><button class="btn">Save settings</button></div>
+  </form>`;
   $('#sf').onsubmit = (e) => {
     e.preventDefault();
+    const d = fd(e.target);
+    toggleKeys.forEach((k) => { d[k] = e.target.elements[k].checked ? 1 : 0; });
     withBtn($('.btn', e.target), async () => {
-      await api('/api/admin/settings', 'PUT', fd(e.target));
+      await api('/api/admin/settings', 'PUT', d);
       toast('Settings saved', 'good');
     });
   };

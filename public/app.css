@@ -306,3 +306,42 @@ svg.ico,svg.icon-svg{width:22px;height:22px;vertical-align:middle}
 @media (max-width:639px){
   .bottomnav ~ * .pwa-banner,body:has(.bottomnav) .pwa-banner{bottom:calc(72px + var(--safe-b,0px))}
 }
+
+/* ---------- tiles (More page + admin Settings) ---------- */
+.sec-title{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700;margin:20px 2px 8px}
+.main>.sec-title:first-child,#sf>.sec-title:first-child{margin-top:8px}
+.tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+@media (min-width:640px){.tiles{grid-template-columns:repeat(3,1fr)}}
+@media (min-width:1200px){.tiles{grid-template-columns:repeat(4,1fr)}}
+.tiles.tiles-settings{grid-template-columns:1fr}
+@media (min-width:640px){.tiles.tiles-settings{grid-template-columns:repeat(2,1fr)}}
+@media (min-width:1200px){.tiles.tiles-settings{grid-template-columns:repeat(3,1fr)}}
+.tile{display:flex;flex-direction:column;gap:4px;background:var(--card);border:1.5px solid transparent;border-radius:var(--r);padding:14px;box-shadow:var(--shadow);color:var(--text);transition:transform .12s,border-color .15s,box-shadow .15s}
+a.tile:hover{border-color:var(--brand);transform:translateY(-2px)}
+a.tile:active{transform:scale(.98)}
+.tile-ic{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;flex:none;font-size:20px;background:var(--infobg);color:var(--info);margin-bottom:6px}
+.tile-ic svg{width:21px;height:21px}
+.tone-violet .tile-ic{background:rgba(91,75,255,.14);color:var(--brand)}
+.tone-green .tile-ic{background:var(--okbg);color:var(--ok)}
+.tone-amber .tile-ic{background:var(--warnbg);color:var(--warn)}
+.tone-red .tile-ic{background:var(--badbg);color:var(--bad)}
+.tile-t{font-weight:700;font-size:14.5px}
+.tile-d{color:var(--muted);font-size:12.5px;line-height:1.35}
+.tile.setting{gap:12px}
+.tile.setting:focus-within{border-color:var(--brand)}
+.setting-head{display:flex;gap:12px;align-items:center}
+.setting-head .tile-ic{margin:0}
+.tile.setting input[type=number]{padding:10px 12px;font-weight:700}
+.tile.setting .switch{padding:2px 0}
+.savebar{position:sticky;bottom:calc(var(--nav) + var(--safe-b) + 10px);z-index:20;margin-top:20px;display:flex;gap:10px;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px 12px;box-shadow:0 10px 30px rgba(20,22,50,.15)}
+.savebar .btn{margin-left:auto;flex:none}
+@media (min-width:900px){.savebar{bottom:16px}}
+
+/* ---------- improved menus ---------- */
+.bottomnav button{position:relative;transition:color .15s}
+.bottomnav button.on:before{content:"";position:absolute;top:0;left:50%;width:30px;height:3px;margin-left:-15px;border-radius:0 0 4px 4px;background:var(--grad)}
+.bottomnav button:active svg{transform:scale(.9)}
+.sidebar a.logout{color:var(--bad)}
+.sidebar a.logout svg{color:var(--bad)}
+.sidebar a.logout:hover{background:var(--badbg)}
+.sidebar .sec:first-child{margin-top:4px}
