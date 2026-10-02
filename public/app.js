@@ -90,23 +90,50 @@ const loading = () => '<div class="splash" style="min-height:40dvh"><div class="
 
 /* ---------- auth screens ---------- */
 function renderAuth() {
-  $('#app').innerHTML = `<div class="authwrap"><div class="authtop"><div class="logo">${LOGO}</div><h1>Email Scheduler</h1><p>Send & schedule emails, never miss a birthday</p></div><div class="authcard"><div id="authbody"></div></div></div>`;
+  $('#app').innerHTML = `
+  <div class="authwrap">
+    <div class="authtop">
+      <div class="logo">${LOGO}</div>
+      <h1>Email Scheduler</h1>
+      <p class="tagline">Your personal email reminder &amp; greeting assistant</p>
+      <div class="auth-features">
+        <div class="af"><span class="af-ic">✉️</span><div><strong>Send now</strong><small>Email anyone in seconds</small></div></div>
+        <div class="af"><span class="af-ic">⏰</span><div><strong>Schedule</strong><small>One-time, daily, weekly, monthly</small></div></div>
+        <div class="af"><span class="af-ic">🎂</span><div><strong>Greetings</strong><small>Birthdays &amp; anniversaries</small></div></div>
+        <div class="af"><span class="af-ic">📱</span><div><strong>Install app</strong><small>Works on phone &amp; PC (PWA)</small></div></div>
+      </div>
+      <p class="auth-howto">Sign in to manage contacts, templates, and reminders. All times use <strong>Sri Lanka (UTC+5:30)</strong>. After login, use <em>Add to Home Screen</em> (mobile) or the install icon in your browser (PC) for a full app experience.</p>
+    </div>
+    <div class="authcard"><div id="authbody"></div></div>
+  </div>`;
   authLogin();
 }
 const emailField = (v = '') => `<label>Email address</label><input name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" value="${esc(v)}" required>`;
 function authLogin() {
   const b = $('#authbody');
-  b.innerHTML = `<div class="tabs"><button class="on">Log in</button><button id="to-reg">Sign up</button></div>
-  <form id="f">${emailField()}<label>Password</label><input name="password" type="password" autocomplete="current-password" required>
-  <button class="btn block">Log in</button></form>
-  <div class="row" style="justify-content:center;margin-top:10px"><button class="linkbtn" id="forgot">Forgot password?</button></div>`;
+  b.innerHTML = `
+  <div class="tabs"><button class="on">Log in</button><button id="to-reg">Sign up</button></div>
+  <p class="auth-lead">Welcome back. Enter your email and password to continue.</p>
+  <form id="f">
+    ${emailField()}
+    <label>Password</label><input name="password" type="password" autocomplete="current-password" required>
+    <button class="btn block">Log in</button>
+  </form>
+  <div class="row" style="justify-content:center;margin-top:12px"><button class="linkbtn" id="forgot">Forgot password?</button></div>
+  <div class="auth-foot muted small">New here? Tap <strong>Sign up</strong> — we’ll send a one-time code to your email.</div>`;
   $('#to-reg').onclick = authRegister1; $('#forgot').onclick = authForgot1;
   $('#f').onsubmit = (e) => { e.preventDefault(); withBtn($('.btn', b), async () => { const d = await api('/api/auth/login', 'POST', fd(e.target)); me = d.user; boot(); }); };
 }
 function authRegister1() {
   const b = $('#authbody');
-  b.innerHTML = `<div class="tabs"><button id="to-login">Log in</button><button class="on">Sign up</button></div>
-  <form id="f">${emailField()}<p class="hint">We'll email a verification code to this address.</p><button class="btn block">Send code</button></form>`;
+  b.innerHTML = `
+  <div class="tabs"><button id="to-login">Log in</button><button class="on">Sign up</button></div>
+  <p class="auth-lead">Create a free account. We’ll send a 6-digit code to verify your email.</p>
+  <form id="f">
+    ${emailField()}
+    <p class="hint">Use an email you can access — the code arrives in a few seconds.</p>
+    <button class="btn block">Send verification code</button>
+  </form>`;
   $('#to-login').onclick = authLogin;
   $('#f').onsubmit = (e) => { e.preventDefault(); const d = fd(e.target); withBtn($('.btn', b), async () => { await api('/api/auth/register/request', 'POST', d); authOtp(d.email, 'register'); }); };
 }
@@ -623,4 +650,21 @@ async function boot() {
   }
 }
 boot();
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+// PWA install hint (Chrome/Edge on PC & Android)
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+});
+window.__installPwa = async () => {
+  if (!deferredPrompt) {
+    toast('On mobile: browser menu → Add to Home Screen. On PC: use the install icon in the address bar.', 'good');
+    return;
+  }
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+};
