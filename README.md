@@ -133,6 +133,6 @@ Set `DEV_MODE` = `1` on the Pages project: OTPs are written to the function logs
 - Personal contacts, with import from vCard (.vcf) or CSV
 - Message templates with `{name}`, `{sender}`, `{year}`, `{email}`
 - Configurable per-user limits (admin)
-- Bulk email campaigns (admin)
+- Contact search, multi-select and bulk email (campaigns) for every user; type-ahead and a contact picker on email fields
 - Audit-friendly email history
 - PWA-ready frontend
