@@ -485,6 +485,30 @@ route('POST', '/api/contacts', 'user', async (c) => {
     throw e;
   }
 });
+route('POST', '/api/contacts/import', 'user', async (c) => {
+  const list = Array.isArray(c.body.contacts) ? c.body.contacts : [];
+  if (!list.length) throw new ApiError('NO_CONTACTS', 'No contacts found in the file.');
+  if (list.length > 1000) throw new ApiError('TOO_MANY', 'Import at most 1000 contacts at a time.');
+  const { results: ex } = await c.env.DB.prepare('SELECT email FROM contacts WHERE user_id=?').bind(c.user.id).all();
+  const have = new Set(ex.map((r) => r.email));
+  const isAdmin = c.user.role === 'ADMIN';
+  let room = isAdmin ? Infinity : c.settings.max_contacts - ex.length;
+  const t = now(), rows = [];
+  let invalid = 0, duplicates = 0, overLimit = 0;
+  for (const it of list) {
+    const email = normalizeEmail(it && it.email);
+    const name = clean(it && it.name, 80) || (email ? email.split('@')[0] : '');
+    if (!email || !name) { invalid++; continue; }
+    if (have.has(email)) { duplicates++; continue; }
+    if (room <= 0) { overLimit++; continue; }
+    have.add(email); room--;
+    const bd = toMMDD(it.birthday), an = toMMDD(it.anniversary);
+    rows.push(c.env.DB.prepare('INSERT OR IGNORE INTO contacts(user_id,name,email,birthday,anniversary,notes,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)')
+      .bind(c.user.id, name, email, bd || null, an || null, clean(it.notes, 300) || null, t, t));
+  }
+  for (let i = 0; i < rows.length; i += 90) await c.env.DB.batch(rows.slice(i, i + 90));
+  return ok({ imported: rows.length, duplicates, invalid, over_limit: overLimit });
+});
 route('PUT', '/api/contacts/:id', 'user', async (c) => {
   const name = clean(c.body.name, 80); if (!name) throw new ApiError('INVALID_NAME', 'Name is required.');
   const email = normalizeEmail(c.body.email); if (!email) throw new ApiError('INVALID_EMAIL', 'Enter a valid email address.');
