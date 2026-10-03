@@ -183,8 +183,14 @@ async function sendEmail(env, { to, subject, html, text, senderName }) {
     return { ok: false, code: 'NETWORK', message: 'Could not reach email provider', permanent: false };
   }
 }
+/** Turn http(s):// URLs in already-escaped text into clickable links */
+const linkify = (s) => s.replace(/(https?:\/\/[^\s<"]+)/gi, (m) => {
+  const t = m.match(/[.,!?;:)\]]+$/);
+  const url = t ? m.slice(0, -t[0].length) : m;
+  return `<a href="${url}" style="color:#5b4bff">${url}</a>${t ? t[0] : ''}`;
+});
 async function sendAndLog(env, { userId, to, subject, message, type, ref, senderName }) {
-  const html = `<div style="font-family:system-ui,sans-serif;line-height:1.5">${message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</div>`;
+  const html = `<div style="font-family:system-ui,sans-serif;line-height:1.5">${linkify(message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')).replace(/\n/g, '<br>')}</div>`;
   const r = await sendEmail(env, { to, subject, html, text: message, senderName });
   const t = now();
   await env.DB.prepare('INSERT INTO email_logs(user_id,recipient_email,message_type,message_reference,subject_preview,message_preview,provider_message_id,status,error_code,error_message,sent_at,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
