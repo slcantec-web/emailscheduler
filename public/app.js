@@ -557,12 +557,107 @@ function scheduleForm() {
 }
 
 const initials = (n) => (String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('') || '?').toUpperCase();
+/* ---------- contact import (vCard / CSV) ---------- */
+function normMD(v) {
+  v = String(v || '').trim();
+  if (!v) return '';
+  const m = v.match(/^(?:\d{4}-)?(\d{2})-(\d{2})$/) || v.match(/^--(\d{2})-?(\d{2})$/);
+  if (m) return `${m[1]}-${m[2]}`;
+  const d = v.replace(/\D/g, '');
+  if (d.length === 8) return `${d.slice(4, 6)}-${d.slice(6, 8)}`;
+  return '';
+}
+function parseVcf(text) {
+  const out = [];
+  const unfolded = text.replace(/\r\n|\r/g, '\n').replace(/\n[ \t]/g, '');
+  for (const block of unfolded.split(/BEGIN:VCARD/i).slice(1)) {
+    const c = { name: '', email: '', birthday: '', anniversary: '' };
+    let n = '';
+    for (const line of block.split('\n')) {
+      const i = line.indexOf(':');
+      if (i < 0) continue;
+      const key = line.slice(0, i).split(';')[0].replace(/^.*\./, '').toUpperCase();
+      const val = line.slice(i + 1).replace(/\\n/gi, ' ').replace(/\\([,;\\])/g, '$1').trim();
+      if (key === 'FN' && !c.name) c.name = val;
+      else if (key === 'N' && !n) n = val.split(';').slice(0, 2).reverse().join(' ').trim();
+      else if (key === 'EMAIL' && !c.email) c.email = val;
+      else if (key === 'BDAY') c.birthday = normMD(val);
+      else if (key === 'ANNIVERSARY' || key === 'X-ANNIVERSARY') c.anniversary = normMD(val);
+    }
+    if (!c.name) c.name = n;
+    if (c.email) out.push(c);
+  }
+  return out;
+}
+function parseCsvRows(text) {
+  const rows = []; let row = [], f = '', q = false;
+  text = text.replace(/^﻿/, '');
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ',' || ch === ';') { row.push(f); f = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(f); rows.push(row); row = []; f = ''; }
+    else f += ch;
+  }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  return rows.filter((r) => r.some((x) => x.trim()));
+}
+function parseCsv(text) {
+  const rows = parseCsvRows(text);
+  if (rows.length < 2) return [];
+  const h = rows[0].map((x) => x.trim().toLowerCase());
+  const find = (fn) => h.map((x, i) => (fn(x) ? i : -1)).filter((i) => i >= 0);
+  const emailCols = find((x) => /e-?mail/.test(x) && !/label|type/.test(x));
+  const nameCol = find((x) => ['name', 'full name', 'display name'].includes(x))[0];
+  const first = find((x) => ['first name', 'given name', 'firstname'].includes(x))[0];
+  const last = find((x) => ['last name', 'family name', 'surname', 'lastname'].includes(x))[0];
+  const bd = find((x) => /birth/.test(x))[0];
+  const an = find((x) => /anniversary/.test(x))[0];
+  return rows.slice(1).map((r) => {
+    const g = (i) => (i == null ? '' : (r[i] || '').trim());
+    const email = emailCols.map(g).find(Boolean) || '';
+    const name = g(nameCol) || [g(first), g(last)].filter(Boolean).join(' ');
+    return { name, email, birthday: normMD(g(bd)), anniversary: normMD(g(an)) };
+  }).filter((c) => c.email);
+}
+function importForm() {
+  modal(`<h3>Import contacts</h3>
+    <p class="muted small">Upload a vCard (.vcf) or CSV file. CSV needs an email column; name, birthday and anniversary columns are optional. Existing emails are skipped.</p>
+    <input type="file" id="ifile" accept=".vcf,.csv,text/vcard,text/csv">
+    <p class="hint" id="isum"></p>
+    <button class="btn block" id="igo" disabled>Import</button>`, (sheet, close) => {
+    let parsed = [];
+    $('#ifile', sheet).onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        parsed = /\.vcf$/i.test(file.name) || /BEGIN:VCARD/i.test(text) ? parseVcf(text) : parseCsv(text);
+      } catch { parsed = []; }
+      $('#isum', sheet).textContent = parsed.length ? `${parsed.length} contacts with an email found.` : 'No contacts with an email address found.';
+      $('#igo', sheet).disabled = !parsed.length;
+    };
+    $('#igo', sheet).onclick = (e) => withBtn(e.currentTarget, async () => {
+      const r = await api('/api/contacts/import', 'POST', { contacts: parsed.slice(0, 1000) });
+      let msg = `Imported ${r.imported}`;
+      if (r.duplicates) msg += `, ${r.duplicates} already existed`;
+      if (r.invalid) msg += `, ${r.invalid} invalid`;
+      if (r.over_limit) msg += `, ${r.over_limit} skipped (contact limit)`;
+      toast(msg, r.imported ? 'good' : '');
+      close(); pageContacts();
+    });
+  });
+}
+
 async function pageContacts() {
   const data = await api('/api/contacts');
   const list = data.contacts || [];
   $('#main').innerHTML = `
   <div class="page-head"><div><h2>Contacts</h2><p class="muted small">${list.length} saved</p></div>
-  <button class="btn right" id="add">+ Add</button></div>
+  <button class="btn ghost smallbtn right" id="imp">Import</button>
+  <button class="btn" id="add">+ Add</button></div>
   <div id="clist">${list.length ? list.map((c, i) => `
     <div class="card item contact">
       <div class="contact-main">
@@ -576,6 +671,7 @@ async function pageContacts() {
       <div class="actions"><button class="btn smallbtn" data-send="${i}">Send email</button><button class="btn ghost danger smallbtn" data-del="${c.id}">Delete</button></div>
     </div>`).join('') : '<div class="card muted">No contacts yet. Tap + Add to save one.</div>'}</div>`;
   $('#add').onclick = () => contactForm();
+  $('#imp').onclick = () => importForm();
   $$('[data-send]').forEach((b) => b.onclick = () => {
     const c = list[Number(b.dataset.send)];
     sendPrefill = { email: c.email, name: c.name };
