@@ -28,7 +28,7 @@ const ICON = {
 const ic = (n) => `<svg class="icon-svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${ICON[n] || ''}"/></svg>`;
 const LOGO = '<svg viewBox="0 0 24 24" fill="#fff"><path d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>';
 
-let me = null, mySettings = {}, busyNav = 0;
+let me = null, mySettings = {}, busyNav = 0, contactsCache = null;
 
 /* ---------- navigation state (back button + phone back gesture) ---------- */
 const TOP = ['home', 'send', 'schedules', 'contacts', 'more'];
@@ -115,6 +115,7 @@ const loading = () => '<div class="splash" style="min-height:40dvh"><div class="
 
 /* ---------- auth screens ---------- */
 function renderAuth() {
+  contactsCache = null;
   $('#app').innerHTML = `
   <div class="authwrap">
     <div class="authtop">
@@ -358,10 +359,10 @@ function shell(title, sub) {
   ];
   const groups = [
     { t: 'Main', items: nav.slice(0, 4) },
-    { t: 'Tools', items: [{ id: 'history', label: 'History', icon: 'list' }, { id: 'templates', label: 'Templates', icon: 'file' }] },
+    { t: 'Tools', items: [{ id: 'history', label: 'History', icon: 'list' }, { id: 'templates', label: 'Templates', icon: 'file' }, { id: 'campaigns', label: 'Campaigns', icon: 'mega' }] },
     { t: 'Account', items: [{ id: 'profile', label: 'Profile', icon: 'user' }, { id: 'logout', label: 'Log out', icon: 'logout' }] },
   ];
-  if (isAdmin) groups.splice(2, 0, { t: 'Admin', items: [{ id: 'admin', label: 'Users', icon: 'shield' }, { id: 'campaigns', label: 'Campaigns', icon: 'mega' }, { id: 'settings', label: 'Settings', icon: 'settings' }] });
+  if (isAdmin) groups.splice(2, 0, { t: 'Admin', items: [{ id: 'admin', label: 'Users', icon: 'shield' }, { id: 'settings', label: 'Settings', icon: 'settings' }] });
   $('#bnav').innerHTML = nav.map((n) => `<button data-nav="${n.id}">${ic(n.icon)}<span>${n.label}</span></button>`).join('');
   $('#side').innerHTML = groups.map((g) => `<div class="sec">${g.t}</div>` + g.items.map((n) => `<a href="#" class="${n.id === 'logout' ? 'logout' : ''}" data-nav="${n.id}">${ic(n.icon)}${n.label}</a>`).join('')).join('');
   $$('[data-nav]').forEach((el) => el.onclick = (e) => { e.preventDefault(); go(el.dataset.nav); });
@@ -437,15 +438,12 @@ async function pageHome() {
 }
 
 async function pageSend() {
-  const contacts = (await api('/api/contacts')).contacts || [];
-  /* The datalist id must NOT be "clist": app.css styles `.main #clist` as the contacts-page grid,
-     which forced this datalist to render as visible page content. */
   $('#main').innerHTML = `
   <div class="card"><h3>Send email now</h3>
   <form id="f">
     <label>To</label>
-    <input name="recipient" type="email" list="contact-options" placeholder="friend@example.com" required>
-    <datalist id="contact-options">${contacts.map((c) => `<option value="${esc(c.email)}">${esc(c.name)}</option>`).join('')}</datalist>
+    ${recipField()}
+    <p class="hint">Type a name or email to search your contacts, or tap the contacts button.</p>
     <label>Recipient name (optional)</label><input name="recipient_name" maxlength="80" placeholder="For {name} variable">
     <label>Subject</label><input name="subject" maxlength="200" placeholder="Subject line" required>
     <label>Message</label><textarea name="message" rows="6" maxlength="5000" placeholder="You can use {name}, {sender}, {year}" required></textarea>
@@ -454,11 +452,8 @@ async function pageSend() {
     <button class="btn block" style="margin-top:12px">Send now</button>
   </form></div>`;
   const sf = $('#f');
+  bindRecipient(sf, '[name="recipient_name"]');
   if (sendPrefill) { sf.recipient.value = sendPrefill.email; sf.recipient_name.value = sendPrefill.name || ''; sendPrefill = null; }
-  sf.recipient.addEventListener('change', () => {
-    const c = contacts.find((x) => x.email === sf.recipient.value.trim().toLowerCase());
-    if (c && !sf.recipient_name.value) sf.recipient_name.value = c.name;
-  });
   $('#f').onsubmit = (e) => {
     e.preventDefault();
     const d = fd(e.target);
@@ -506,7 +501,7 @@ function scheduleForm() {
       <option value="ANNIVERSARY">Anniversary (yearly)</option>
     </select>
     <div id="when-fields"></div>
-    <label>Recipient email</label><input name="recipient" type="email" required>
+    <label>Recipient email</label>${recipField()}
     <label>Recipient name</label><input name="recipient_name" maxlength="80">
     <label>Subject</label><input name="subject" maxlength="200" value="Reminder" required>
     <label>Message</label><textarea name="message" rows="4" required placeholder="Hi {name}! ..."></textarea>
@@ -515,6 +510,7 @@ function scheduleForm() {
     <label>From name</label><input name="sender_name" maxlength="60" placeholder="${esc(me.sender_name || '')}">
     <button class="btn block" style="margin-top:12px">Schedule</button>
   </form>`, (sheet, close) => {
+    bindRecipient(sheet, '[name="recipient_name"]');
     const when = $('#when-fields', sheet);
     const renderWhen = () => {
       const t = $('#stype', sheet).value;
@@ -651,36 +647,246 @@ function importForm() {
   });
 }
 
+/* ---------- contact search, pickers, campaigns ---------- */
+async function getContacts(force) {
+  if (!contactsCache || force) contactsCache = (await api('/api/contacts')).contacts || [];
+  return contactsCache;
+}
+const cMatch = (c, q) => {
+  if (!q) return true;
+  const h = `${c.name} ${c.email}`.toLowerCase();
+  return q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => h.includes(w));
+};
+
+/* email input + "contacts" button; use with bindRecipient() */
+const recipField = () => `<div class="inwrap"><input name="recipient" type="email" inputmode="email" autocomplete="off" placeholder="name or email@example.com" required data-rcpt>
+  <button type="button" class="btn ghost pickbtn" data-pick aria-label="Pick from contacts" title="Pick from contacts">${ic('users')}</button></div>`;
+
+/* type-ahead: shows matching contacts under an input while typing */
+function suggestFor(input, onPick) {
+  const wrap = document.createElement('div');
+  wrap.className = 'sugwrap';
+  input.parentNode.insertBefore(wrap, input);
+  wrap.append(input);
+  const box = document.createElement('div');
+  box.className = 'sug hide';
+  wrap.append(box);
+  let items = [];
+  const hide = () => box.classList.add('hide');
+  const render = async () => {
+    const q = input.value.trim();
+    if (!q) return hide();
+    let all;
+    try { all = await getContacts(); } catch { return; }
+    items = all.filter((c) => cMatch(c, q)).slice(0, 6);
+    if (!items.length || (items.length === 1 && items[0].email === q.toLowerCase())) return hide();
+    box.innerHTML = items.map((c, i) => `<button type="button" class="sug-item" data-i="${i}"><strong>${esc(c.name)}</strong><small>${esc(c.email)}</small></button>`).join('');
+    box.classList.remove('hide');
+  };
+  input.addEventListener('input', render);
+  input.addEventListener('blur', () => setTimeout(hide, 180));
+  box.addEventListener('pointerdown', (e) => {
+    const b = e.target.closest('.sug-item');
+    if (!b) return;
+    e.preventDefault();
+    const c = items[Number(b.dataset.i)];
+    input.value = c.email;
+    hide();
+    if (onPick) onPick(c);
+  });
+}
+function bindRecipient(root, nameSel) {
+  const input = $('[data-rcpt]', root);
+  if (!input) return;
+  const fill = (c) => {
+    input.value = c.email;
+    const n = nameSel ? $(nameSel, root) : null;
+    if (n) n.value = c.name;
+  };
+  suggestFor(input, fill);
+  $('[data-pick]', root).onclick = async () => {
+    const r = await pickContacts({ multi: false });
+    if (r && r[0]) fill(r[0]);
+  };
+}
+
+/* searchable contact picker (modal). Resolves with an array of contacts. */
+function pickContacts({ multi = true, selected = [] } = {}) {
+  return new Promise((resolve) => {
+    getContacts().then((all) => {
+      const sel = new Set(selected);
+      modal(`<h3>${multi ? 'Select contacts' : 'Pick a contact'}</h3>
+        <input type="search" id="pq" placeholder="Search name or email" autocomplete="off">
+        <div class="row small" style="margin-top:8px"><span class="muted" id="pcount"></span>
+          ${multi ? '<button type="button" class="linkbtn right" id="pall">Select all shown</button><button type="button" class="linkbtn" id="pnone">Clear</button>' : ''}</div>
+        <div class="plist" id="plist"></div>
+        ${multi ? '<button type="button" class="btn block" id="pok">Done</button>' : ''}`, (sheet, close) => {
+        const shown = () => all.filter((c) => cMatch(c, $('#pq', sheet).value.trim()));
+        const count = (n) => { $('#pcount', sheet).textContent = `${n} of ${all.length}` + (multi ? ` · ${sel.size} selected` : ''); };
+        const paint = () => {
+          const list = shown();
+          count(list.length);
+          $('#plist', sheet).innerHTML = list.length
+            ? list.map((c) => `<label class="prow" data-id="${c.id}">${multi ? `<input type="checkbox" ${sel.has(c.id) ? 'checked' : ''}>` : ''}<span class="pt"><strong>${esc(c.name)}</strong><small>${esc(c.email)}</small></span></label>`).join('')
+            : '<p class="muted small" style="padding:12px">No contacts match.</p>';
+        };
+        $('#pq', sheet).oninput = paint;
+        const rowId = (e) => { const r = e.target.closest('.prow'); return r ? Number(r.dataset.id) : null; };
+        if (multi) {
+          $('#plist', sheet).addEventListener('change', (e) => {
+            const id = rowId(e);
+            if (id == null) return;
+            if (e.target.checked) sel.add(id); else sel.delete(id);
+            count(shown().length);
+          });
+          $('#pall', sheet).onclick = () => { shown().forEach((c) => sel.add(c.id)); paint(); };
+          $('#pnone', sheet).onclick = () => { sel.clear(); paint(); };
+          $('#pok', sheet).onclick = () => { close(); resolve(all.filter((c) => sel.has(c.id))); };
+        } else {
+          $('#plist', sheet).addEventListener('click', (e) => {
+            const id = rowId(e);
+            if (id == null) return;
+            close();
+            resolve(all.filter((c) => c.id === id));
+          });
+        }
+        paint();
+        if (window.matchMedia && window.matchMedia('(hover:hover)').matches) setTimeout(() => $('#pq', sheet).focus(), 60);
+      });
+    }).catch((e) => { toast(e.message, 'err'); resolve(null); });
+  });
+}
+
+/* bulk email: from selected contacts (Contacts page) or from scratch (Campaigns page) */
+function campaignForm({ contacts = [], onDone } = {}) {
+  let picked = contacts.slice();
+  modal(`<h3>${contacts.length ? 'Email selected contacts' : 'New campaign'}</h3>
+  <form id="cf">
+    <label>Recipients</label>
+    <div class="rcpt" id="rcpt"></div>
+    <div class="row" style="margin-top:6px"><button type="button" class="btn ghost smallbtn" id="pickc">${ic('users')} Choose contacts</button></div>
+    <label>Extra emails (optional)</label>
+    <textarea name="recipients" rows="2" placeholder="one per line or separated by commas"></textarea>
+    <label>Subject</label><input name="subject" maxlength="200" required>
+    <label>Message</label><textarea name="message" rows="5" maxlength="5000" required placeholder="Hi {name}, ..."></textarea>
+    <p class="hint">Variables: {name} {sender} {year} {email}. {name} comes from the contact.</p>
+    <label>Campaign name (optional)</label><input name="campaign_name" maxlength="80" placeholder="For your own reference">
+    <label>From name (optional)</label><input name="sender_name" maxlength="60" placeholder="${esc(me.sender_name || me.display_name || '')}">
+    <div class="grid2">
+      <div><label>Date (blank = send now)</label><input name="date" type="date"></div>
+      <div><label>Time (Colombo)</label><input name="time" type="time" value="09:00"></div>
+    </div>
+    <p class="hint">Bulk emails are sent in small batches every minute.</p>
+    <button class="btn block">Send</button>
+  </form>`, (sheet, close) => {
+    const paintR = () => {
+      const n = picked.length;
+      const names = picked.slice(0, 3).map((c) => esc(c.name)).join(', ');
+      $('#rcpt', sheet).innerHTML = n ? `<strong>${n}</strong> contact${n > 1 ? 's' : ''}: ${names}${n > 3 ? ` +${n - 3} more` : ''}` : '<span class="muted">No contacts chosen</span>';
+    };
+    paintR();
+    $('#pickc', sheet).onclick = async () => {
+      const r = await pickContacts({ multi: true, selected: picked.map((c) => c.id) });
+      if (r) { picked = r; paintR(); }
+    };
+    $('#cf', sheet).onsubmit = (e) => {
+      e.preventDefault();
+      const d = fd(e.target);
+      d.contact_ids = picked.map((c) => c.id);
+      d.recipients = String(d.recipients || '').split(/[\s,;]+/).filter(Boolean);
+      const total = d.contact_ids.length + d.recipients.length;
+      if (!total) { toast('Add at least one recipient.', 'err'); return; }
+      withBtn($('.btn', e.target), async () => {
+        const when = d.date ? 'It will be sent at the scheduled time.' : 'It will start sending right away.';
+        if (!(await confirmBox('Send to ' + total + ' recipient' + (total > 1 ? 's' : '') + '?', when, 'Send'))) return;
+        const r = await api(me.role === 'ADMIN' ? '/api/admin/campaigns' : '/api/campaigns', 'POST', d);
+        toast(`Campaign created for ${r.recipients} recipient${r.recipients > 1 ? 's' : ''}`, 'good');
+        close();
+        if (onDone) onDone();
+      });
+    };
+  });
+}
+
+const initialsOf = (n) => (String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('') || '?').toUpperCase();
 async function pageContacts() {
-  const data = await api('/api/contacts');
-  const list = data.contacts || [];
+  let all = await getContacts(true);
+  const sel = new Set();
+  let q = '';
   $('#main').innerHTML = `
-  <div class="page-head"><div><h2>Contacts</h2><p class="muted small">${list.length} saved</p></div>
-  <button class="btn ghost smallbtn right" id="imp">Import</button>
-  <button class="btn" id="add">+ Add</button></div>
-  <div id="clist">${list.length ? list.map((c, i) => `
-    <div class="card item contact">
-      <div class="contact-main">
-        <span class="avatar-sm">${esc(initials(c.name))}</span>
-        <div class="contact-info">
-          <strong>${esc(c.name)}</strong>
-          <span class="muted small ellip">${esc(c.email)}</span>
-          ${c.birthday || c.anniversary ? `<div class="contact-tags">${c.birthday ? `<span class="tag">🎂 ${esc(fmtMD(c.birthday))}</span>` : ''}${c.anniversary ? `<span class="tag">💍 ${esc(fmtMD(c.anniversary))}</span>` : ''}</div>` : ''}
-        </div>
-      </div>
-      <div class="actions"><button class="btn smallbtn" data-send="${i}">Send email</button><button class="btn ghost danger smallbtn" data-del="${c.id}">Delete</button></div>
-    </div>`).join('') : '<div class="card muted">No contacts yet. Tap + Add to save one.</div>'}</div>`;
+  <div class="page-head"><div><h2>Contacts</h2><p class="muted small" id="ccount"></p></div>
+  <div class="head-actions"><button class="btn ghost smallbtn" id="imp">Import</button>
+  <button class="btn" id="add">+ Add</button></div></div>
+  <div class="searchbar"><input type="search" id="cq" placeholder="Search contacts by name or email" autocomplete="off"></div>
+  <div class="row small" style="margin:2px 0 8px"><span class="muted" id="cinfo"></span>
+    <button type="button" class="linkbtn right" id="selall">Select all shown</button></div>
+  <div id="clist"></div>
+  <div class="selbar hide" id="selbar"><span id="selcount"></span>
+    <button type="button" class="btn ghost smallbtn" id="selclear">Clear</button>
+    <button type="button" class="btn smallbtn" id="selsend">${ic('send')} Email</button></div>`;
+  const shown = () => all.filter((c) => cMatch(c, q));
+  const bar = () => {
+    $('#selbar').classList.toggle('hide', sel.size === 0);
+    $('#selcount').textContent = `${sel.size} selected`;
+  };
+  const paint = () => {
+    const list = shown();
+    $('#ccount').textContent = q ? `${list.length} of ${all.length} shown` : `${all.length} saved`;
+    $('#cinfo').textContent = all.length ? (q ? `${list.length} match${list.length === 1 ? '' : 'es'}` : 'Tick contacts to email them together') : '';
+    $('#selall').classList.toggle('hide', !list.length);
+    $('#clist').innerHTML = list.length ? list.map((c) => `
+      <div class="card item contact crow${sel.has(c.id) ? ' on' : ''}" data-id="${c.id}">
+        <label class="contact-main">
+          <input type="checkbox" ${sel.has(c.id) ? 'checked' : ''} aria-label="Select ${esc(c.name)}">
+          <span class="avatar-sm">${esc(initialsOf(c.name))}</span>
+          <div class="contact-info">
+            <strong>${esc(c.name)}</strong>
+            <span class="muted small ellip">${esc(c.email)}</span>
+            ${c.birthday || c.anniversary ? `<div class="contact-tags">${c.birthday ? `<span class="tag">🎂 ${esc(fmtMD(c.birthday))}</span>` : ''}${c.anniversary ? `<span class="tag">💍 ${esc(fmtMD(c.anniversary))}</span>` : ''}</div>` : ''}
+          </div>
+        </label>
+        <div class="actions"><button type="button" class="btn smallbtn" data-send="${c.id}">Send email</button><button type="button" class="btn ghost danger smallbtn" data-del="${c.id}">Delete</button></div>
+      </div>`).join('') : `<div class="card muted">${all.length ? 'No contacts match your search.' : 'No contacts yet. Tap + Add to save one.'}</div>`;
+    bar();
+  };
+  paint();
+  $('#cq').oninput = (e) => { q = e.target.value.trim(); paint(); };
+  $('#selall').onclick = () => { shown().forEach((c) => sel.add(c.id)); paint(); };
+  $('#selclear').onclick = () => { sel.clear(); paint(); };
+  $('#selsend').onclick = () => campaignForm({
+    contacts: all.filter((c) => sel.has(c.id)),
+    onDone: () => { sel.clear(); go('campaigns', { push: true }); },
+  });
+  $('#clist').addEventListener('change', (e) => {
+    const row = e.target.closest('.crow');
+    if (!row) return;
+    const id = Number(row.dataset.id);
+    if (e.target.checked) sel.add(id); else sel.delete(id);
+    row.classList.toggle('on', e.target.checked);
+    bar();
+  });
+  $('#clist').addEventListener('click', async (e) => {
+    const sb = e.target.closest('[data-send]');
+    if (sb) {
+      const c = all.find((x) => x.id === Number(sb.dataset.send));
+      if (c) { sendPrefill = { email: c.email, name: c.name }; go('send', { push: true }); }
+      return;
+    }
+    const b = e.target.closest('[data-del]');
+    if (!b) return;
+    if (!(await confirmBox('Delete contact', 'Remove this contact?', 'Delete'))) return;
+    try {
+      await api('/api/contacts/' + b.dataset.del, 'DELETE');
+      const id = Number(b.dataset.del);
+      all = all.filter((c) => c.id !== id);
+      contactsCache = all;
+      sel.delete(id);
+      toast('Deleted', 'good');
+      paint();
+    } catch (err) { toast(err.message, 'err'); }
+  });
   $('#add').onclick = () => contactForm();
   $('#imp').onclick = () => importForm();
-  $$('[data-send]').forEach((b) => b.onclick = () => {
-    const c = list[Number(b.dataset.send)];
-    sendPrefill = { email: c.email, name: c.name };
-    go('send', { push: true });
-  });
-  $$('[data-del]').forEach((b) => b.onclick = async () => {
-    if (!(await confirmBox('Delete contact', 'Remove this contact?', 'Delete'))) return;
-    try { await api('/api/contacts/' + b.dataset.del, 'DELETE'); toast('Deleted', 'good'); pageContacts(); } catch (e) { toast(e.message, 'err'); }
-  });
 }
 function contactForm() {
   modal(`<h3>Add contact</h3>
@@ -790,13 +996,13 @@ async function pageMore() {
     { title: 'Your account', items: [
       { id: 'history', label: 'Email history', desc: 'Everything you have sent', icon: 'list', tone: 'blue' },
       { id: 'templates', label: 'Templates', desc: 'Reusable messages', icon: 'file', tone: 'violet' },
+      { id: 'campaigns', label: 'Campaigns', desc: 'Email many contacts at once', icon: 'mega', tone: 'amber' },
       { id: 'profile', label: 'Profile', desc: 'Name, From name, password', icon: 'user', tone: 'green' },
     ] },
   ];
   if (me.role === 'ADMIN') {
     groups.push({ title: 'Admin', items: [
       { id: 'admin', label: 'Users', desc: 'Accounts and limits', icon: 'shield', tone: 'violet' },
-      { id: 'campaigns', label: 'Campaigns', desc: 'Bulk email sends', icon: 'mega', tone: 'amber' },
       { id: 'settings', label: 'Settings', desc: 'System limits and access', icon: 'settings', tone: 'blue' },
     ] });
   }
@@ -894,43 +1100,32 @@ async function pageAdmin() {
 }
 
 async function pageCampaigns() {
-  if (me.role !== 'ADMIN') return go('home');
-  const data = await api('/api/admin/campaigns');
+  const isAdmin = me.role === 'ADMIN';
+  const base = isAdmin ? '/api/admin/campaigns' : '/api/campaigns';
+  const data = await api(base);
   const list = data.campaigns || [];
   $('#main').innerHTML = `
-  <div class="page-head"><h2>Campaigns</h2><button class="btn right" id="add">+ New</button></div>
-  <div class="list">${list.length ? list.map((c) => `
+  <div class="page-head"><h2>Campaigns</h2>
+  <div class="head-actions"><button class="btn ghost smallbtn" id="refresh">Refresh</button>
+  <button class="btn smallbtn" id="add">+ New</button></div></div>
+  <p class="muted small" style="margin-bottom:12px">Email many people at once. Up to ${data.max_recipients} recipients per campaign, sent in batches every minute. Tip: tick contacts on the Contacts tab and tap Email.</p>
+  <div class="list">${list.length ? list.map((c) => {
+    const done = (c.sent || 0) + (c.failed || 0);
+    const pct = c.total ? Math.round((done / c.total) * 100) : 0;
+    return `
     <div class="card item">
       <div class="row"><strong>${esc(c.campaign_name)}</strong> ${statusBadge(c.status)}</div>
       <div class="muted small">${esc(c.subject)} · ${fmtDT(c.scheduled_at)}</div>
+      <div class="bar"><i style="width:${pct}%"></i></div>
       <div class="small">Total ${c.total || 0} · Sent ${c.sent || 0} · Failed ${c.failed || 0} · Pending ${c.pending || 0}</div>
-      ${['SCHEDULED', 'RUNNING'].includes(c.status) ? `<button class="btn ghost danger smallbtn" style="margin-top:8px" data-cancel="${c.id}">Cancel</button>` : ''}
-    </div>`).join('') : '<div class="card muted">No campaigns yet.</div>'}</div>`;
-  $('#add').onclick = () => {
-    modal(`<h3>New campaign</h3>
-    <form id="cf">
-      <label>Name</label><input name="campaign_name" required>
-      <label>Subject</label><input name="subject" required>
-      <label>Message</label><textarea name="message" rows="5" required></textarea>
-      <label>Recipients (emails, one per line or comma)</label><textarea name="recipients" rows="4" required></textarea>
-      <label>Date (optional, blank = send now)</label><input name="date" type="date">
-      <label>Time (Colombo UTC+5:30)</label><input name="time" type="time" value="09:00">
-      <button class="btn block" style="margin-top:12px">Create</button>
-    </form>`, (sheet, close) => {
-      $('#cf', sheet).onsubmit = (e) => {
-        e.preventDefault();
-        const d = fd(e.target);
-        d.recipients = String(d.recipients || '').split(/[\s,;]+/).filter(Boolean);
-        withBtn($('.btn', e.target), async () => {
-          await api('/api/admin/campaigns', 'POST', d);
-          toast('Campaign created', 'good'); close(); pageCampaigns();
-        });
-      };
-    });
-  };
+      ${['SCHEDULED', 'RUNNING'].includes(c.status) ? `<button class="btn ghost danger smallbtn" style="margin-top:8px;align-self:flex-start" data-cancel="${c.id}">Cancel</button>` : ''}
+    </div>`;
+  }).join('') : '<div class="card muted">No campaigns yet.</div>'}</div>`;
+  $('#refresh').onclick = () => pageCampaigns().catch((e) => toast(e.message, 'err'));
+  $('#add').onclick = () => campaignForm({ onDone: pageCampaigns });
   $$('[data-cancel]').forEach((b) => b.onclick = async () => {
-    if (!(await confirmBox('Cancel campaign', 'Stop this campaign?', 'Cancel'))) return;
-    try { await api('/api/admin/campaigns/' + b.dataset.cancel + '/cancel', 'POST', {}); pageCampaigns(); } catch (e) { toast(e.message, 'err'); }
+    if (!(await confirmBox('Cancel campaign', 'Stop this campaign? Emails not yet sent will not be sent.', 'Cancel it'))) return;
+    try { await api(base + '/' + b.dataset.cancel + '/cancel', 'POST', {}); toast('Cancelled', 'good'); pageCampaigns(); } catch (e) { toast(e.message, 'err'); }
   });
 }
 
