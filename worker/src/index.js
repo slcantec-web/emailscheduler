@@ -655,6 +655,7 @@ route('DELETE', '/api/admin/users/:id', 'admin', async (c) => {
   if (!target) throw new ApiError('NOT_FOUND', 'User not found.', 404);
   if (target.role === 'ADMIN') throw new ApiError('FORBIDDEN', 'Cannot delete another admin account.', 403);
   await c.env.DB.prepare('DELETE FROM sessions WHERE user_id=?').bind(id).run();
+  await c.env.DB.prepare('DELETE FROM email_campaigns WHERE created_by=?').bind(id).run();
   await c.env.DB.prepare('DELETE FROM users WHERE id=?').bind(id).run();
   await audit(c.env, c.user.id, 'USER_DELETED', 'user', id, { email: target.email });
   return ok({});
@@ -670,51 +671,99 @@ route('GET', '/api/admin/email', 'admin', async (c) => {
   const { results } = await c.env.DB.prepare(`SELECT l.id,l.recipient_email,l.message_type,l.subject_preview,l.message_preview,l.status,l.error_message,l.created_at,u.display_name FROM email_logs l LEFT JOIN users u ON u.id=l.user_id WHERE l.message_type!='OTP' ${failed ? "AND l.status='FAILED'" : ''} ORDER BY l.id DESC LIMIT 30 OFFSET ?`).bind(off).all();
   return ok({ logs: results, next_offset: results.length === 30 ? off + 30 : null });
 });
-route('GET', '/api/admin/campaigns', 'admin', async (c) => {
-  const { results } = await c.env.DB.prepare(`SELECT c.*, 
+// --- campaigns: users manage their own, admin manages all
+async function listCampaigns(c, all) {
+  const sql = `SELECT c.*,
     (SELECT COUNT(*) FROM email_campaign_recipients r WHERE r.campaign_id=c.id) total,
     (SELECT COUNT(*) FROM email_campaign_recipients r WHERE r.campaign_id=c.id AND r.status='SENT') sent,
     (SELECT COUNT(*) FROM email_campaign_recipients r WHERE r.campaign_id=c.id AND r.status='FAILED') failed,
     (SELECT COUNT(*) FROM email_campaign_recipients r WHERE r.campaign_id=c.id AND r.status IN ('PENDING','PROCESSING')) pending
-    FROM email_campaigns c ORDER BY c.id DESC LIMIT 50`).all();
+    FROM email_campaigns c ${all ? '' : 'WHERE c.created_by=?'} ORDER BY c.id DESC LIMIT 50`;
+  const st = c.env.DB.prepare(sql);
+  const { results } = await (all ? st : st.bind(c.user.id)).all();
   return ok({ campaigns: results, max_recipients: c.settings.max_bulk_recipients });
-});
-route('POST', '/api/admin/campaigns', 'admin', async (c) => {
-  const name = clean(c.body.campaign_name, 80); if (!name) throw new ApiError('INVALID_NAME', 'Campaign name is required.');
-  const subject = clean(c.body.subject || name, MAX_SUBJECT);
-  const msg = clean(c.body.message, MAX_MSG + 1); validateTemplate(msg);
-  if (/\{name\}/.test(msg) || /\{name\}/.test(subject)) throw new ApiError('UNKNOWN_VARIABLE', '{name} is not available in bulk campaigns.');
-  const list = Array.isArray(c.body.recipients) ? c.body.recipients : String(c.body.recipients || '').split(/[\s,;]+/);
-  const emails = [...new Set(list.filter(Boolean).map(normalizeEmail))];
-  if (emails.some((e) => !e)) throw new ApiError('INVALID_EMAIL', 'One or more recipient emails are invalid.');
+}
+async function createCampaign(c) {
+  const b = c.body, isAdmin = c.user.role === 'ADMIN';
+  const rawSubject = clean(b.subject, MAX_SUBJECT + 1);
+  const name = clean(b.campaign_name, 80) || clean(rawSubject, 80);
+  if (!name) throw new ApiError('INVALID_NAME', 'Campaign name or subject is required.');
+  const subject = rawSubject || name;
+  validateTemplate(subject, MAX_SUBJECT);
+  const msg = clean(b.message, MAX_MSG + 1);
+  validateTemplate(msg);
+
+  // recipients: typed emails + selected contacts (contacts supply names for {name})
+  const found = new Map();
+  let bad = 0;
+  const add = (email, nm) => {
+    const e = normalizeEmail(email);
+    if (!e) { bad++; return; }
+    const n = clean(nm || '', 80);
+    if (!found.has(e) || (!found.get(e) && n)) found.set(e, n);
+  };
+  const raw = Array.isArray(b.recipients) ? b.recipients : String(b.recipients || '').split(/[\s,;]+/);
+  for (const r of raw) {
+    if (!r) continue;
+    if (typeof r === 'string') add(r, '');
+    else if (typeof r === 'object') add(r.email, r.name);
+    else bad++;
+  }
+  const ids = [...new Set((Array.isArray(b.contact_ids) ? b.contact_ids : []).map(Number).filter(Number.isInteger))];
+  if (ids.length > 5000) throw new ApiError('TOO_MANY_RECIPIENTS', 'Too many contacts selected.');
+  for (let i = 0; i < ids.length; i += 80) {
+    const part = ids.slice(i, i + 80);
+    const { results } = await c.env.DB.prepare(`SELECT name,email FROM contacts WHERE user_id=? AND id IN (${part.map(() => '?').join(',')})`).bind(c.user.id, ...part).all();
+    for (const r of results) add(r.email, r.name);
+  }
+  if (bad) throw new ApiError('INVALID_EMAIL', 'One or more recipient emails are invalid.');
+  const emails = [...found.keys()];
   if (!emails.length) throw new ApiError('NO_RECIPIENTS', 'Add at least one recipient.');
   if (emails.length > c.settings.max_bulk_recipients) throw new ApiError('TOO_MANY_RECIPIENTS', `Maximum ${c.settings.max_bulk_recipients} recipients per campaign.`);
-  let at = now();
-  if (c.body.date && c.body.time) { at = toEpoch(clean(c.body.date, 10), clean(c.body.time, 5)); if (!at) throw new ApiError('INVALID_DATE', 'Invalid schedule date/time.'); if (at < now() - 60) throw new ApiError('PAST_DATE', 'Schedule time must be in the future.'); }
-  const sender = clean(c.body.sender_name, 60);
+
+  if (!isAdmin) {
+    if (!(await rateLimit(c.env, `camp:${c.user.id}`, 10, 3600))) throw new ApiError('RATE_LIMIT', 'Too many campaigns created. Try again later.', 429);
+    const pend = await c.env.DB.prepare("SELECT COUNT(*) c FROM email_campaign_recipients r JOIN email_campaigns k ON k.id=r.campaign_id WHERE k.created_by=? AND r.status IN ('PENDING','PROCESSING')").bind(c.user.id).first();
+    await checkQuota(c.env, c.user, c.settings, emails.length + pend.c);
+  }
+
   const t = now();
-  const composed = composeMessage(msg, { sender: sender || c.user.sender_name, signature: false });
-  const r = await c.env.DB.prepare('INSERT INTO email_campaigns(created_by,campaign_name,subject,message,sender_name,scheduled_at,status,created_at) VALUES(?,?,?,?,?,?,?,?)').bind(c.user.id, name, subject, composed, sender || null, at, 'SCHEDULED', t).run();
+  let at = t;
+  if (b.date && b.time) {
+    at = toEpoch(clean(b.date, 10), clean(b.time, 5));
+    if (!at) throw new ApiError('INVALID_DATE', 'Invalid schedule date/time.');
+    if (at < t - 60) throw new ApiError('PAST_DATE', 'Schedule time must be in the future.');
+  }
+  const sender = isAdmin ? clean(b.sender_name, 60) : resolveSender(c.settings, c.user, b.sender_name || undefined);
+  const r = await c.env.DB.prepare('INSERT INTO email_campaigns(created_by,campaign_name,subject,message,sender_name,scheduled_at,status,created_at) VALUES(?,?,?,?,?,?,?,?)')
+    .bind(c.user.id, name, subject, msg, sender || c.user.sender_name || null, at, 'SCHEDULED', t).run();
   const id = r.meta.last_row_id;
-  const stmts = emails.map((e) => c.env.DB.prepare('INSERT INTO email_campaign_recipients(campaign_id,recipient_email,status,created_at) VALUES(?,?,?,?)').bind(id, e, 'PENDING', t));
+  const stmts = emails.map((e) => c.env.DB.prepare('INSERT INTO email_campaign_recipients(campaign_id,recipient_email,recipient_name,status,created_at) VALUES(?,?,?,?,?)').bind(id, e, found.get(e) || null, 'PENDING', t));
   for (let i = 0; i < stmts.length; i += 90) await c.env.DB.batch(stmts.slice(i, i + 90));
   await audit(c.env, c.user.id, 'CAMPAIGN_CREATED', 'campaign', id, { recipients: emails.length });
   return ok({ id, recipients: emails.length });
-});
+}
+async function cancelCampaign(c, all) {
+  const id = Number(c.params.id);
+  const r = await c.env.DB.prepare(`UPDATE email_campaigns SET status='CANCELLED', completed_at=? WHERE id=? AND status IN ('SCHEDULED','RUNNING') ${all ? '' : 'AND created_by=?'}`)
+    .bind(...(all ? [now(), id] : [now(), id, c.user.id])).run();
+  if (!r.meta.changes) throw new ApiError('NOT_FOUND', 'No cancellable campaign found.', 404);
+  await c.env.DB.prepare("UPDATE email_campaign_recipients SET status='CANCELLED' WHERE campaign_id=? AND status='PENDING'").bind(id).run();
+  await audit(c.env, c.user.id, 'CAMPAIGN_CANCELLED', 'campaign', id);
+  return ok({});
+}
+route('GET', '/api/admin/campaigns', 'admin', (c) => listCampaigns(c, true));
+route('POST', '/api/admin/campaigns', 'admin', (c) => createCampaign(c));
+route('GET', '/api/campaigns', 'user', (c) => listCampaigns(c, false));
+route('POST', '/api/campaigns', 'user', (c) => createCampaign(c));
 route('GET', '/api/admin/campaigns/:id', 'admin', async (c) => {
   const camp = await c.env.DB.prepare('SELECT * FROM email_campaigns WHERE id=?').bind(Number(c.params.id)).first();
   if (!camp) throw new ApiError('NOT_FOUND', 'Campaign not found.', 404);
   const { results } = await c.env.DB.prepare('SELECT recipient_email,recipient_name,status,error_message,sent_at FROM email_campaign_recipients WHERE campaign_id=? ORDER BY id LIMIT 500').bind(camp.id).all();
   return ok({ campaign: camp, recipients: results });
 });
-route('POST', '/api/admin/campaigns/:id/cancel', 'admin', async (c) => {
-  const id = Number(c.params.id);
-  const r = await c.env.DB.prepare("UPDATE email_campaigns SET status='CANCELLED', completed_at=? WHERE id=? AND status IN ('SCHEDULED','RUNNING')").bind(now(), id).run();
-  if (!r.meta.changes) throw new ApiError('NOT_FOUND', 'No cancellable campaign found.', 404);
-  await c.env.DB.prepare("UPDATE email_campaign_recipients SET status='CANCELLED' WHERE campaign_id=? AND status='PENDING'").bind(id).run();
-  await audit(c.env, c.user.id, 'CAMPAIGN_CANCELLED', 'campaign', id);
-  return ok({});
-});
+route('POST', '/api/admin/campaigns/:id/cancel', 'admin', (c) => cancelCampaign(c, true));
+route('POST', '/api/campaigns/:id/cancel', 'user', (c) => cancelCampaign(c, false));
 route('GET', '/api/admin/settings', 'admin', async (c) => ok({ settings: c.settings }));
 route('PUT', '/api/admin/settings', 'admin', async (c) => {
   const stmts = [], changed = {};
@@ -789,8 +838,14 @@ async function processCampaigns(env, settings) {
   const camp = await env.DB.prepare("SELECT * FROM email_campaigns WHERE status='RUNNING' ORDER BY id LIMIT 1").first();
   if (!camp) return;
   const { results } = await env.DB.prepare("UPDATE email_campaign_recipients SET status='PROCESSING' WHERE id IN (SELECT id FROM email_campaign_recipients WHERE campaign_id=? AND status='PENDING' ORDER BY id LIMIT ?) AND status='PENDING' RETURNING *").bind(camp.id, Math.min(settings.bulk_batch_size, 40)).all();
+  let defSender = camp.sender_name || '';
+  if (!defSender) {
+    const owner = await env.DB.prepare('SELECT sender_name FROM users WHERE id=?').bind(camp.created_by).first();
+    defSender = (owner && owner.sender_name) || '';
+  }
   for (const rec of results) {
-    const r = await sendAndLog(env, { userId: camp.created_by, to: rec.recipient_email, subject: camp.subject, message: camp.message, type: 'CAMPAIGN', ref: `campaign:${camp.id}`, senderName: camp.sender_name || undefined });
+    const vars = { name: rec.recipient_name, sender: defSender, email: rec.recipient_email };
+    const r = await sendAndLog(env, { userId: camp.created_by, to: rec.recipient_email, subject: composeMessage(camp.subject, vars), message: composeMessage(camp.message, vars), type: 'CAMPAIGN', ref: `campaign:${camp.id}`, senderName: camp.sender_name || undefined });
     await env.DB.prepare('UPDATE email_campaign_recipients SET status=?, provider_message_id=?, sent_at=?, error_message=? WHERE id=?').bind(r.ok ? 'SENT' : 'FAILED', r.id ?? null, r.ok ? now() : null, r.ok ? null : r.message, rec.id).run();
   }
   const left = await env.DB.prepare("SELECT COUNT(*) c FROM email_campaign_recipients WHERE campaign_id=? AND status IN ('PENDING','PROCESSING')").bind(camp.id).first();
