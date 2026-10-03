@@ -30,7 +30,7 @@ This project is configured for your **app-transactional** project on mail.cloude
 | Field | Value |
 |---|---|
 | Project | `app-transactional` |
-| API key | `proj_live_8b8b9b7c7311c73e8249c2f2060ac20ed50a11fd983d2065` |
+| API key | `YOUR_EMAIL_API_KEY` |
 | From email | `notifications@cloudebase.top` |
 | From name | `Cloudebase App` |
 | Endpoint | `https://mail.cloudebase.top` |
@@ -75,7 +75,7 @@ Pages project → **Settings**. Set these for **Production** (and Preview if you
 
 | Name | Type | Value |
 |---|---|---|
-| `EMAIL_API_KEY` | **Secret** | `proj_live_8b8b9b7c7311c73e8249c2f2060ac20ed50a11fd983d2065` |
+| `EMAIL_API_KEY` | **Secret** | `YOUR_EMAIL_API_KEY` |
 | `SESSION_SECRET` | **Secret** | any long random string (32+ characters) |
 | `EMAIL_API_URL` | Text | `https://mail.cloudebase.top` |
 | `EMAIL_FROM_EMAIL` | Text | `notifications@cloudebase.top` |
@@ -130,7 +130,7 @@ Set `DEV_MODE` = `1` on the Pages project: OTPs are written to the function logs
 - Send single emails
 - Schedule one-time emails / reminders
 - Birthday & anniversary yearly greetings
-- Personal contacts
+- Personal contacts, with import from vCard (.vcf) or CSV
 - Message templates with `{name}`, `{sender}`, `{year}`, `{email}`
 - Configurable per-user limits (admin)
 - Bulk email campaigns (admin)
