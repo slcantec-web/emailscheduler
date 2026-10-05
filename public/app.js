@@ -61,9 +61,9 @@ function toast(msg, kind = '') {
   const t = document.createElement('div'); t.className = 'toast ' + kind; t.textContent = msg;
   $('#toasts').append(t); setTimeout(() => t.remove(), 3500);
 }
-function modal(html, ready) {
+function modal(html, ready, cls = '') {
   const o = document.createElement('div'); o.className = 'overlay';
-  o.innerHTML = `<div class="sheet" role="dialog"><div class="grab"></div><button type="button" class="sheet-x" aria-label="Close">&times;</button>${html}</div>`;
+  o.innerHTML = `<div class="sheet ${cls}" role="dialog"><div class="grab"></div><button type="button" class="sheet-x" aria-label="Close">&times;</button>${html}</div>`;
   let pushed = false;
   try { history.pushState({ page: curPage, depth: navDepth, modal: 1 }, ''); pushed = true; } catch { /* ignore */ }
   const close = (fromPop) => {
@@ -882,6 +882,7 @@ async function campaignForm({ contacts = [], onDone } = {}) {
   try { await getContacts(); } catch { /* picker will report */ }
   modal(`<h3>${contacts.length ? 'Email selected contacts' : 'New campaign'}</h3>
   <form id="cf">
+    <div class="cf-grid"><div class="cf-col">
     <label>Recipients</label>
     <div class="chipwrap">
       <div class="chipbox" id="chipbox"><span class="chiplist" id="chiplist"></span><input id="chipin" type="text" inputmode="email" autocomplete="off" autocapitalize="off" placeholder="Type or paste emails, press Enter"></div>
@@ -892,6 +893,7 @@ async function campaignForm({ contacts = [], onDone } = {}) {
       <button type="button" class="linkbtn" id="allc">All</button>
       <button type="button" class="linkbtn" id="clrc">Clear</button></div>
     <p class="hint">Paste a whole list at once (commas, spaces or new lines). Start typing a name to pick from your contacts.</p>
+    </div><div class="cf-col">
     <label>Subject</label><input name="subject" maxlength="200" required>
     <label>Message</label><textarea name="message" rows="5" maxlength="5000" required placeholder="Hi {name}, ..."></textarea>
     <p class="hint">Variables: {name} {sender} {year} {email}. {name} comes from the contact.</p>
@@ -899,6 +901,7 @@ async function campaignForm({ contacts = [], onDone } = {}) {
     <label>From name (optional)</label><input name="sender_name" maxlength="60" placeholder="${esc(me.sender_name || me.display_name || '')}">
     ${repeatSelectHtml()}
     <p class="hint">Bulk emails are sent in small batches every minute.</p>
+    </div></div>
     <button class="btn block">Send</button>
   </form>`, (sheet, close) => {
     const chips = chipsInput(sheet, contacts);
@@ -927,7 +930,7 @@ async function campaignForm({ contacts = [], onDone } = {}) {
         if (onDone) onDone();
       });
     };
-  });
+  }, 'sheet-full');
 }
 
 const initialsOf = (n) => (String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('') || '?').toUpperCase();
