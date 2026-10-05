@@ -104,9 +104,9 @@ function nextWeekly(weekday, hhmm, after) {
   }
   return null;
 }
-/** dayOfMonth 1–31; clamps to last day of month */
+/** dayOfMonth 1–31 or 'L' (last day); clamps to last day of month */
 function nextMonthly(dayOfMonth, hhmm, after) {
-  const dom = Math.min(31, Math.max(1, Number(dayOfMonth)));
+  const dom = String(dayOfMonth).toUpperCase() === 'L' ? 31 : Math.min(31, Math.max(1, Number(dayOfMonth)));
   const start = colomboParts(after);
   for (let i = 0; i < 14; i++) {
     let y = start.y, m = start.m + i;
@@ -131,6 +131,37 @@ function toMMDD(v) {
   const s = String(v).trim();
   const m = s.match(/^(?:\d{4}-)?(\d{2}-\d{2})$/);
   return m && validMMDD(m[1]) ? m[1] : false;
+}
+/** Shared repeat parser (schedules + campaigns). Returns { type, rule, next } */
+function parseRepeat(type, b, time, after) {
+  let rule, next;
+  if (type === 'DAILY') {
+    rule = 'daily'; next = nextDaily(time, after);
+  } else if (type === 'WEEKLY') {
+    const map = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+    let wd = b.weekday != null ? b.weekday : b.date;
+    if (typeof wd === 'string' && map[wd.toLowerCase().slice(0, 3)] != null) wd = map[wd.toLowerCase().slice(0, 3)];
+    wd = Number(wd);
+    if (!Number.isInteger(wd) || wd < 0 || wd > 6) throw new ApiError('INVALID_DATE', 'Choose a weekday.');
+    rule = String(wd); next = nextWeekly(wd, time, after);
+  } else if (type === 'MONTHLY') {
+    const raw = b.day_of_month != null ? b.day_of_month : (clean(b.date, 10).match(/(\d{1,2})$/) || [])[1];
+    if (String(raw).toUpperCase() === 'L') rule = 'L';
+    else {
+      const day = Number(raw);
+      if (!Number.isInteger(day) || day < 1 || day > 31) throw new ApiError('INVALID_DATE', 'Choose a day of month (1-31 or last day).');
+      rule = String(day);
+    }
+    next = nextMonthly(rule, time, after);
+  } else if (type === 'YEARLY') {
+    const mmdd = toMMDD(clean(b.date, 10));
+    if (!mmdd) throw new ApiError('INVALID_DATE', 'Choose the date to repeat every year.');
+    rule = mmdd; next = nextYearly(mmdd, time, after);
+  } else {
+    throw new ApiError('INVALID_TYPE', 'Invalid repeat type.');
+  }
+  if (!next) throw new ApiError('INVALID_DATE', 'Could not compute the next run.');
+  return { type, rule, next };
 }
 
 /* ---------- settings / rate limit / audit ---------- */
@@ -327,11 +358,8 @@ async function buildSchedule(env, user, settings, b) {
     if (!next) throw new ApiError('INVALID_DATE', 'Could not compute next weekly run.');
     Object.assign(f, { scheduledAt: null, nextRun: next, rule: String(wd), status: 'ACTIVE' });
   } else if (type === 'MONTHLY') {
-    let day = Number(b.day_of_month != null ? b.day_of_month : (clean(b.date, 10).match(/(\d{1,2})$/) || [])[1]);
-    if (!Number.isInteger(day) || day < 1 || day > 31) throw new ApiError('INVALID_DATE', 'Choose a day of month (1–31).');
-    const next = nextMonthly(day, time, t);
-    if (!next) throw new ApiError('INVALID_DATE', 'Could not compute next monthly run.');
-    Object.assign(f, { scheduledAt: null, nextRun: next, rule: String(day), status: 'ACTIVE' });
+    const p = parseRepeat('MONTHLY', b, time, t);
+    Object.assign(f, { scheduledAt: null, nextRun: p.next, rule: p.rule, status: 'ACTIVE' });
   } else {
     // YEARLY / BIRTHDAY / ANNIVERSARY
     let mmdd = toMMDD(clean(b.date, 10));
@@ -728,15 +756,22 @@ async function createCampaign(c) {
   }
 
   const t = now();
-  let at = t;
-  if (b.date && b.time) {
+  let at = t, rep = null;
+  const rtype = clean(b.repeat, 10).toUpperCase();
+  if (rtype) {
+    const time = clean(b.time, 5);
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new ApiError('INVALID_TIME', 'Enter a valid time (HH:MM).');
+    rep = parseRepeat(rtype, b, time, t);
+    rep.time = time;
+    at = rep.next;
+  } else if (b.date && b.time) {
     at = toEpoch(clean(b.date, 10), clean(b.time, 5));
     if (!at) throw new ApiError('INVALID_DATE', 'Invalid schedule date/time.');
     if (at < t - 60) throw new ApiError('PAST_DATE', 'Schedule time must be in the future.');
   }
   const sender = isAdmin ? clean(b.sender_name, 60) : resolveSender(c.settings, c.user, b.sender_name || undefined);
-  const r = await c.env.DB.prepare('INSERT INTO email_campaigns(created_by,campaign_name,subject,message,sender_name,scheduled_at,status,created_at) VALUES(?,?,?,?,?,?,?,?)')
-    .bind(c.user.id, name, subject, msg, sender || c.user.sender_name || null, at, 'SCHEDULED', t).run();
+  const r = await c.env.DB.prepare('INSERT INTO email_campaigns(created_by,campaign_name,subject,message,sender_name,scheduled_at,status,created_at,repeat_type,repeat_rule,repeat_time) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+    .bind(c.user.id, name, subject, msg, sender || c.user.sender_name || null, at, 'SCHEDULED', t, rep ? rep.type : null, rep ? rep.rule : null, rep ? rep.time : null).run();
   const id = r.meta.last_row_id;
   const stmts = emails.map((e) => c.env.DB.prepare('INSERT INTO email_campaign_recipients(campaign_id,recipient_email,recipient_name,status,created_at) VALUES(?,?,?,?,?)').bind(id, e, found.get(e) || null, 'PENDING', t));
   for (let i = 0; i < stmts.length; i += 90) await c.env.DB.batch(stmts.slice(i, i + 90));
@@ -832,6 +867,16 @@ async function processSchedules(env, settings) {
     }
   }
 }
+/** Recurring campaign: create the next run with the same recipients */
+async function spawnNextCampaign(env, camp) {
+  const t = now();
+  const next = computeNextRun(camp.repeat_type, camp.repeat_rule, camp.repeat_time || '09:00', t);
+  if (!next) return;
+  const r = await env.DB.prepare('INSERT INTO email_campaigns(created_by,campaign_name,subject,message,sender_name,scheduled_at,status,created_at,repeat_type,repeat_rule,repeat_time) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+    .bind(camp.created_by, camp.campaign_name, camp.subject, camp.message, camp.sender_name, next, 'SCHEDULED', t, camp.repeat_type, camp.repeat_rule, camp.repeat_time).run();
+  await env.DB.prepare("INSERT INTO email_campaign_recipients(campaign_id,recipient_email,recipient_name,status,created_at) SELECT ?,recipient_email,recipient_name,'PENDING',? FROM email_campaign_recipients WHERE campaign_id=?")
+    .bind(r.meta.last_row_id, t, camp.id).run();
+}
 async function processCampaigns(env, settings) {
   const t = now();
   await env.DB.prepare("UPDATE email_campaigns SET status='RUNNING', started_at=? WHERE status='SCHEDULED' AND scheduled_at<=?").bind(t, t).run();
@@ -849,7 +894,10 @@ async function processCampaigns(env, settings) {
     await env.DB.prepare('UPDATE email_campaign_recipients SET status=?, provider_message_id=?, sent_at=?, error_message=? WHERE id=?').bind(r.ok ? 'SENT' : 'FAILED', r.id ?? null, r.ok ? now() : null, r.ok ? null : r.message, rec.id).run();
   }
   const left = await env.DB.prepare("SELECT COUNT(*) c FROM email_campaign_recipients WHERE campaign_id=? AND status IN ('PENDING','PROCESSING')").bind(camp.id).first();
-  if (left.c === 0) await env.DB.prepare("UPDATE email_campaigns SET status='COMPLETED', completed_at=? WHERE id=? AND status='RUNNING'").bind(now(), camp.id).run();
+  if (left.c === 0) {
+    const done = await env.DB.prepare("UPDATE email_campaigns SET status='COMPLETED', completed_at=? WHERE id=? AND status='RUNNING'").bind(now(), camp.id).run();
+    if (done.meta.changes && camp.repeat_type) await spawnNextCampaign(env, camp);
+  }
 }
 async function runCron(env) {
   try {
