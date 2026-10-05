@@ -503,3 +503,13 @@ label.contact-main{cursor:pointer;margin:0;font-weight:inherit;font-size:inherit
 .prow .pt{display:flex;flex-direction:column;min-width:0}
 .prow .pt small{color:var(--muted);overflow-wrap:anywhere}
 .rcpt{background:var(--bg);border-radius:12px;padding:10px 12px;font-size:13.5px;overflow-wrap:anywhere}
+
+/* ---------- recipient chips (campaign form) ---------- */
+.chipwrap{position:relative}
+.chipbox{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:48px;padding:6px 8px;border:1.5px solid var(--line);border-radius:12px;background:var(--card);cursor:text;max-height:180px;overflow-y:auto}
+.chipbox:focus-within{border-color:var(--brand);box-shadow:0 0 0 4px rgba(91,75,255,.15)}
+.chiplist{display:contents}
+.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:4px 4px 4px 11px;border-radius:99px;background:rgba(91,75,255,.12);color:var(--brand);font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip button{border:0;background:rgba(91,75,255,.18);color:var(--brand);width:22px;height:22px;border-radius:50%;font-size:16px;line-height:1;cursor:pointer;display:grid;place-items:center;padding:0;flex:none}
+.chipbox input{flex:1;min-width:150px;width:auto;border:0;box-shadow:none;padding:8px 4px;background:transparent}
+.chipbox input:focus{border:0;box-shadow:none}

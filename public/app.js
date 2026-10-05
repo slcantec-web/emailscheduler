@@ -107,11 +107,47 @@ function scheduleRuleLabel(s) {
   if (t === 'ONE_TIME') return 'Once';
   if (t === 'DAILY') return `Every day at ${tm}`;
   if (t === 'WEEKLY') return `Every ${WEEKDAYS[Number(r)] || r} at ${tm}`;
-  if (t === 'MONTHLY') return `Day ${r} each month at ${tm}`;
+  if (t === 'MONTHLY') return r === 'L' ? `Last day of each month at ${tm}` : r === '1' ? `First day of each month at ${tm}` : `Day ${r} each month at ${tm}`;
   if (t === 'YEARLY' || t === 'BIRTHDAY' || t === 'ANNIVERSARY') return `${r || ''} each year at ${tm}`.trim();
   return tm ? `at ${tm}` : '';
 }
 const loading = () => '<div class="splash" style="min-height:40dvh"><div class="spinner"></div></div>';
+
+/* ---------- repeat options (shared by Send email, Campaigns) ---------- */
+const monthDayOpts = () => `<option value="1">First day of month (1st)</option><option value="L">Last day of month (month end)</option>${Array.from({ length: 30 }, (_, i) => `<option value="${i + 2}">Day ${i + 2}</option>`).join('')}`;
+const repeatSelectHtml = () => `<label>Repeat</label>
+  <select name="repeat" id="rep">
+    <option value="">Don't repeat</option>
+    <option value="DAILY">Every day</option>
+    <option value="WEEKLY">Every week</option>
+    <option value="MONTHLY">Every month</option>
+    <option value="YEARLY">Every year</option>
+  </select>
+  <div id="rep-fields"></div>`;
+/* onceHtml = what to show when "Don't repeat" is chosen. onChange(type) is optional. */
+function bindRepeat(root, onceHtml = '', onChange) {
+  const sel = $('#rep', root), box = $('#rep-fields', root);
+  const timeHtml = '<label>Time (Colombo)</label><input name="time" type="time" value="09:00" required>';
+  const paint = () => {
+    const t = sel.value;
+    if (!t) box.innerHTML = onceHtml;
+    else if (t === 'DAILY') box.innerHTML = `${timeHtml}<p class="hint">Sends every day at this time.</p>`;
+    else if (t === 'WEEKLY') box.innerHTML = `<label>Day of week</label><select name="weekday">${WEEKDAYS.map((n, i) => `<option value="${i}"${i === 1 ? ' selected' : ''}>Every ${n}</option>`).join('')}</select>${timeHtml}`;
+    else if (t === 'MONTHLY') box.innerHTML = `<label>Day of month</label><select name="day_of_month">${monthDayOpts()}</select>${timeHtml}<p class="hint">Month end always means the last day (28, 29, 30 or 31).</p>`;
+    else box.innerHTML = `<label>Date each year</label><input name="date" type="date" value="${slDate(0)}" required>${timeHtml}<p class="hint">Only month and day are used.</p>`;
+    if (onChange) onChange(t);
+  };
+  sel.onchange = paint;
+  paint();
+  return { paint };
+}
+function repeatPayload(d) {
+  if (!d.repeat) return d;
+  if (d.weekday != null) d.weekday = Number(d.weekday);
+  if (d.day_of_month != null && d.day_of_month !== 'L') d.day_of_month = Number(d.day_of_month);
+  if (d.repeat === 'YEARLY' && d.date && d.date.length === 10) d.date = d.date.slice(5);
+  return d;
+}
 
 /* ---------- auth screens ---------- */
 function renderAuth() {
@@ -439,7 +475,7 @@ async function pageHome() {
 
 async function pageSend() {
   $('#main').innerHTML = `
-  <div class="card"><h3>Send email now</h3>
+  <div class="card"><h3>Send email</h3>
   <form id="f">
     <label>To</label>
     ${recipField()}
@@ -449,19 +485,32 @@ async function pageSend() {
     <label>Message</label><textarea name="message" rows="6" maxlength="5000" placeholder="You can use {name}, {sender}, {year}" required></textarea>
     <label>From name (optional)</label><input name="sender_name" maxlength="60" placeholder="${esc(me.sender_name || me.display_name || '')}">
     <label class="check"><input type="checkbox" name="append_signature" value="1" checked> Append signature</label>
-    <button class="btn block" style="margin-top:12px">Send now</button>
+    ${repeatSelectHtml()}
+    <button class="btn block" id="sendbtn" style="margin-top:12px">Send now</button>
   </form></div>`;
   const sf = $('#f');
   bindRecipient(sf, '[name="recipient_name"]');
   if (sendPrefill) { sf.recipient.value = sendPrefill.email; sf.recipient_name.value = sendPrefill.name || ''; sendPrefill = null; }
-  $('#f').onsubmit = (e) => {
+  const rep = bindRepeat(sf, '', (t) => { $('#sendbtn', sf).textContent = t ? 'Schedule repeat' : 'Send now'; });
+  sf.onsubmit = (e) => {
     e.preventDefault();
     const d = fd(e.target);
-    d.append_signature = !!e.target.append_signature.checked;
-    withBtn($('.btn', e.target), async () => {
-      await api('/api/email/send', 'POST', d);
-      toast('Email sent!', 'good');
+    withBtn($('#sendbtn', e.target), async () => {
+      if (d.repeat) {
+        repeatPayload(d);
+        await api('/api/schedules', 'POST', {
+          schedule_type: d.repeat, recipient: d.recipient, recipient_name: d.recipient_name,
+          subject: d.subject, message: d.message, sender_name: d.sender_name,
+          time: d.time, weekday: d.weekday, day_of_month: d.day_of_month, date: d.date,
+        });
+        toast('Repeat schedule created! See it under Schedules.', 'good');
+      } else {
+        d.append_signature = !!e.target.append_signature.checked;
+        await api('/api/email/send', 'POST', d);
+        toast('Email sent!', 'good');
+      }
       e.target.reset();
+      rep.paint();
     });
   };
 }
@@ -525,8 +574,8 @@ function scheduleForm() {
           <p class="hint">Sends every week on this day.</p>`;
       } else if (t === 'MONTHLY') {
         when.innerHTML = `<label>Day of month</label>
-          <select name="day_of_month">${Array.from({ length: 31 }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('')}</select>
-          <p class="hint">Sends on this day each month (shorter months use the last day).</p>`;
+          <select name="day_of_month">${monthDayOpts()}</select>
+          <p class="hint">Month end always means the last day (28, 29, 30 or 31).</p>`;
       } else {
         when.innerHTML = `<label>Date each year</label><input name="date" type="date" value="${slDate(0)}" required>
           <p class="hint">Only month & day are used — repeats every year.</p>`;
@@ -541,7 +590,7 @@ function scheduleForm() {
         d.date = d.date.slice(5); // YYYY-MM-DD → MM-DD
       }
       if (d.weekday != null) d.weekday = Number(d.weekday);
-      if (d.day_of_month != null) d.day_of_month = Number(d.day_of_month);
+      if (d.day_of_month != null && d.day_of_month !== 'L') d.day_of_month = Number(d.day_of_month);
       withBtn($('.btn', e.target), async () => {
         await api('/api/schedules', 'POST', d);
         toast('Scheduled!', 'good');
@@ -757,47 +806,120 @@ function pickContacts({ multi = true, selected = [] } = {}) {
   });
 }
 
+/* chip input: type/paste many emails, contacts type-ahead, remove with x */
+function chipsInput(root, initial = []) {
+  const items = new Map();
+  const EMAIL_RE = /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/;
+  const list = $('#chiplist', root), input = $('#chipin', root), sug = $('#chipsug', root), cnt = $('#chipcount', root);
+  const known = (e) => (contactsCache || []).find((c) => c.email === e);
+  const put = (c) => { const e = String(c.email).toLowerCase(); if (!items.has(e)) items.set(e, { email: e, name: c.name || '', id: c.id }); };
+  initial.forEach(put);
+  let sItems = [];
+  const hideSug = () => sug.classList.add('hide');
+  const paint = () => {
+    list.innerHTML = [...items.values()].map((c) => `<span class="chip" title="${esc(c.email)}">${esc(c.name || c.email)}<button type="button" data-rm="${esc(c.email)}" aria-label="Remove">&times;</button></span>`).join('');
+    cnt.textContent = items.size ? `${items.size} recipient${items.size > 1 ? 's' : ''}` : 'No recipients yet';
+  };
+  const commit = (text) => {
+    const bad = [];
+    for (const tok of String(text).split(/[\s,;]+/).filter(Boolean)) {
+      const e = tok.toLowerCase().replace(/^<|>$/g, '');
+      if (!EMAIL_RE.test(e)) { bad.push(tok); continue; }
+      put(known(e) || { email: e });
+    }
+    input.value = bad.join(' ');
+    if (bad.length) toast(`Not a valid email: ${bad.slice(0, 3).join(', ')}`, 'err');
+    paint(); hideSug();
+  };
+  input.addEventListener('keydown', (e) => {
+    const v = input.value.trim();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!v) return;
+      if (!EMAIL_RE.test(v) && sItems.length) { put(sItems[0]); input.value = ''; paint(); hideSug(); } else commit(v);
+    } else if ((e.key === ',' || e.key === ';' || (e.key === ' ' && EMAIL_RE.test(v))) && v) {
+      e.preventDefault(); commit(v);
+    } else if (e.key === 'Backspace' && !input.value && items.size) {
+      items.delete([...items.keys()].pop()); paint();
+    }
+  });
+  input.addEventListener('paste', (e) => {
+    const t = (e.clipboardData || window.clipboardData).getData('text');
+    if (/[\s,;]/.test(t.trim())) { e.preventDefault(); commit(`${input.value} ${t}`); }
+  });
+  input.addEventListener('blur', () => setTimeout(() => { if (EMAIL_RE.test(input.value.trim())) commit(input.value); hideSug(); }, 180));
+  input.addEventListener('input', () => {
+    const q = input.value.trim();
+    if (!q) return hideSug();
+    sItems = (contactsCache || []).filter((c) => !items.has(c.email) && cMatch(c, q)).slice(0, 6);
+    if (!sItems.length) return hideSug();
+    sug.innerHTML = sItems.map((c, i) => `<button type="button" class="sug-item" data-i="${i}"><strong>${esc(c.name)}</strong><small>${esc(c.email)}</small></button>`).join('');
+    sug.classList.remove('hide');
+  });
+  sug.addEventListener('pointerdown', (e) => {
+    const b = e.target.closest('.sug-item');
+    if (!b) return;
+    e.preventDefault();
+    put(sItems[Number(b.dataset.i)]); input.value = ''; paint(); hideSug(); input.focus();
+  });
+  list.addEventListener('click', (e) => { const b = e.target.closest('[data-rm]'); if (b) { items.delete(b.dataset.rm); paint(); } });
+  $('#chipbox', root).addEventListener('click', (e) => { if (!e.target.closest('button')) input.focus(); });
+  paint();
+  return {
+    items,
+    flush: () => { if (input.value.trim()) commit(input.value); return !input.value.trim(); },
+    pick: async () => {
+      const r = await pickContacts({ multi: true, selected: [...items.values()].filter((c) => c.id).map((c) => c.id) });
+      if (r) { for (const [k, v] of [...items]) if (v.id) items.delete(k); r.forEach(put); paint(); }
+    },
+    addAll: () => { (contactsCache || []).forEach(put); paint(); },
+    clear: () => { items.clear(); paint(); },
+  };
+}
+
 /* bulk email: from selected contacts (Contacts page) or from scratch (Campaigns page) */
-function campaignForm({ contacts = [], onDone } = {}) {
-  let picked = contacts.slice();
+async function campaignForm({ contacts = [], onDone } = {}) {
+  try { await getContacts(); } catch { /* picker will report */ }
   modal(`<h3>${contacts.length ? 'Email selected contacts' : 'New campaign'}</h3>
   <form id="cf">
     <label>Recipients</label>
-    <div class="rcpt" id="rcpt"></div>
-    <div class="row" style="margin-top:6px"><button type="button" class="btn ghost smallbtn" id="pickc">${ic('users')} Choose contacts</button></div>
-    <label>Extra emails (optional)</label>
-    <textarea name="recipients" rows="2" placeholder="one per line or separated by commas"></textarea>
+    <div class="chipwrap">
+      <div class="chipbox" id="chipbox"><span class="chiplist" id="chiplist"></span><input id="chipin" type="text" inputmode="email" autocomplete="off" autocapitalize="off" placeholder="Type or paste emails, press Enter"></div>
+      <div class="sug hide" id="chipsug"></div>
+    </div>
+    <div class="row small" style="margin-top:6px"><span class="muted" id="chipcount"></span>
+      <button type="button" class="linkbtn right" id="pickc">${ic('users')} Choose contacts</button>
+      <button type="button" class="linkbtn" id="allc">All</button>
+      <button type="button" class="linkbtn" id="clrc">Clear</button></div>
+    <p class="hint">Paste a whole list at once (commas, spaces or new lines). Start typing a name to pick from your contacts.</p>
     <label>Subject</label><input name="subject" maxlength="200" required>
     <label>Message</label><textarea name="message" rows="5" maxlength="5000" required placeholder="Hi {name}, ..."></textarea>
     <p class="hint">Variables: {name} {sender} {year} {email}. {name} comes from the contact.</p>
     <label>Campaign name (optional)</label><input name="campaign_name" maxlength="80" placeholder="For your own reference">
     <label>From name (optional)</label><input name="sender_name" maxlength="60" placeholder="${esc(me.sender_name || me.display_name || '')}">
-    <div class="grid2">
-      <div><label>Date (blank = send now)</label><input name="date" type="date"></div>
-      <div><label>Time (Colombo)</label><input name="time" type="time" value="09:00"></div>
-    </div>
+    ${repeatSelectHtml()}
     <p class="hint">Bulk emails are sent in small batches every minute.</p>
     <button class="btn block">Send</button>
   </form>`, (sheet, close) => {
-    const paintR = () => {
-      const n = picked.length;
-      const names = picked.slice(0, 3).map((c) => esc(c.name)).join(', ');
-      $('#rcpt', sheet).innerHTML = n ? `<strong>${n}</strong> contact${n > 1 ? 's' : ''}: ${names}${n > 3 ? ` +${n - 3} more` : ''}` : '<span class="muted">No contacts chosen</span>';
-    };
-    paintR();
-    $('#pickc', sheet).onclick = async () => {
-      const r = await pickContacts({ multi: true, selected: picked.map((c) => c.id) });
-      if (r) { picked = r; paintR(); }
-    };
+    const chips = chipsInput(sheet, contacts);
+    $('#pickc', sheet).onclick = () => chips.pick();
+    $('#allc', sheet).onclick = () => chips.addAll();
+    $('#clrc', sheet).onclick = () => chips.clear();
+    bindRepeat(sheet, `<div class="grid2">
+      <div><label>Date (blank = send now)</label><input name="date" type="date"></div>
+      <div><label>Time (Colombo)</label><input name="time" type="time" value="09:00"></div>
+    </div>`);
     $('#cf', sheet).onsubmit = (e) => {
       e.preventDefault();
-      const d = fd(e.target);
-      d.contact_ids = picked.map((c) => c.id);
-      d.recipients = String(d.recipients || '').split(/[\s,;]+/).filter(Boolean);
-      const total = d.contact_ids.length + d.recipients.length;
-      if (!total) { toast('Add at least one recipient.', 'err'); return; }
+      if (!chips.flush()) { toast('One of the emails is not valid. Fix or clear it first.', 'err'); return; }
+      const all = [...chips.items.values()];
+      if (!all.length) { toast('Add at least one recipient.', 'err'); return; }
+      const d = repeatPayload(fd(e.target));
+      d.contact_ids = all.filter((c) => c.id).map((c) => c.id);
+      d.recipients = all.filter((c) => !c.id).map((c) => c.email);
+      const total = all.length;
       withBtn($('.btn', e.target), async () => {
-        const when = d.date ? 'It will be sent at the scheduled time.' : 'It will start sending right away.';
+        const when = d.repeat ? 'This campaign repeats automatically. Cancel it on the Campaigns page to stop.' : d.date ? 'It will be sent at the scheduled time.' : 'It will start sending right away.';
         if (!(await confirmBox('Send to ' + total + ' recipient' + (total > 1 ? 's' : '') + '?', when, 'Send'))) return;
         const r = await api(me.role === 'ADMIN' ? '/api/admin/campaigns' : '/api/campaigns', 'POST', d);
         toast(`Campaign created for ${r.recipients} recipient${r.recipients > 1 ? 's' : ''}`, 'good');
@@ -1116,6 +1238,7 @@ async function pageCampaigns() {
     <div class="card item">
       <div class="row"><strong>${esc(c.campaign_name)}</strong> ${statusBadge(c.status)}</div>
       <div class="muted small">${esc(c.subject)} · ${fmtDT(c.scheduled_at)}</div>
+      ${c.repeat_type ? `<div class="small">🔁 ${esc(scheduleRuleLabel({ schedule_type: c.repeat_type, recurrence_rule: c.repeat_rule, send_time: c.repeat_time }))}</div>` : ''}
       <div class="bar"><i style="width:${pct}%"></i></div>
       <div class="small">Total ${c.total || 0} · Sent ${c.sent || 0} · Failed ${c.failed || 0} · Pending ${c.pending || 0}</div>
       ${['SCHEDULED', 'RUNNING'].includes(c.status) ? `<button class="btn ghost danger smallbtn" style="margin-top:8px;align-self:flex-start" data-cancel="${c.id}">Cancel</button>` : ''}
@@ -1124,7 +1247,7 @@ async function pageCampaigns() {
   $('#refresh').onclick = () => pageCampaigns().catch((e) => toast(e.message, 'err'));
   $('#add').onclick = () => campaignForm({ onDone: pageCampaigns });
   $$('[data-cancel]').forEach((b) => b.onclick = async () => {
-    if (!(await confirmBox('Cancel campaign', 'Stop this campaign? Emails not yet sent will not be sent.', 'Cancel it'))) return;
+    if (!(await confirmBox('Cancel campaign', 'Stop this campaign? Emails not yet sent will not be sent, and it will not repeat.', 'Cancel it'))) return;
     try { await api(base + '/' + b.dataset.cancel + '/cancel', 'POST', {}); toast('Cancelled', 'good'); pageCampaigns(); } catch (e) { toast(e.message, 'err'); }
   });
 }
