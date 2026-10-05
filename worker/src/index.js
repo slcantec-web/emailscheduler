@@ -24,10 +24,24 @@ const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, 
 const sha256 = async (s) => hex(await crypto.subtle.digest('SHA-256', enc.encode(s)));
 const rand = (n = 32) => { const a = new Uint8Array(n); crypto.getRandomValues(a); return hex(a); };
 
+const SECURITY_HEADERS = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()',
+  'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
+  'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'",
+};
+
 function respond(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...headers },
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      ...SECURITY_HEADERS,
+      ...headers,
+    },
   });
 }
 const ok = (data = {}, headers) => respond({ success: true, data }, 200, headers);
@@ -288,7 +302,15 @@ async function authenticate(req, env) {
 
 async function requestOtp(env, req, settings, email, purpose, userId) {
   const ip = req.headers.get('CF-Connecting-IP') || 'x';
-  if (!(await rateLimit(env, `otp:${email}`, settings.max_otp_requests, 3600)) || !(await rateLimit(env, `otpip:${ip}`, settings.max_otp_requests * 4, 3600)))
+  // Short window: 3 per email / 15 min, 8 per IP / 15 min (stops rapid spam)
+  // Long window: settings.max_otp_requests per email / hour, 4x that per IP / hour
+  const shortMax = Math.min(3, settings.max_otp_requests);
+  if (
+    !(await rateLimit(env, `otp15:${email}`, shortMax, 900)) ||
+    !(await rateLimit(env, `otpip15:${ip}`, 8, 900)) ||
+    !(await rateLimit(env, `otp:${email}`, settings.max_otp_requests, 3600)) ||
+    !(await rateLimit(env, `otpip:${ip}`, settings.max_otp_requests * 4, 3600))
+  )
     throw new ApiError('OTP_RATE_LIMIT', 'Too many OTP requests. Please try again later.', 429);
   const otp = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1000000).padStart(6, '0');
   const t = now();
@@ -821,7 +843,21 @@ async function handle(req, env, url) {
     if (!env.DB) return respond({ success: false, error: { code: 'NO_DB', message: 'Database not configured.' } }, 500);
     if (!env.SESSION_SECRET) return respond({ success: false, error: { code: 'NO_SECRET', message: 'SESSION_SECRET is not set.' } }, 500);
     const method = req.method.toUpperCase();
-    if (method === 'OPTIONS') return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type,X-Requested-With', 'Access-Control-Max-Age': '86400' } });
+    // Same-origin SPA: do not advertise Access-Control-Allow-Origin: *.
+    // Only echo Origin when it matches this host (needed if anything is called cross-origin).
+    if (method === 'OPTIONS') {
+      const origin = req.headers.get('Origin') || '';
+      const sameOrigin = origin && (origin === url.origin || origin === `https://${url.host}` || origin === `http://${url.host}`);
+      const h = {
+        ...SECURITY_HEADERS,
+        'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type,X-Requested-With',
+        'Access-Control-Allow-Credentials': 'true',
+        'Access-Control-Max-Age': '86400',
+      };
+      if (sameOrigin) h['Access-Control-Allow-Origin'] = origin;
+      return new Response(null, { status: 204, headers: h });
+    }
     const matched = matchRoute(method, url.pathname);
     if (!matched) return respond({ success: false, error: { code: 'NOT_FOUND', message: 'Not found.' } }, 404);
     let body = {};
