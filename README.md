@@ -50,9 +50,26 @@ Keep the folder structure exactly as above (`public/`, `functions/`, `worker/` a
 2. Open the database → **Console** tab.
 3. Paste the full contents of `schema.sql` and run it.  
    - If the console rejects the multi-statement paste, run it in pieces (each `CREATE TABLE` / `CREATE INDEX`, then the final `INSERT`).
-   - **Updating an existing database?** Run this once in the Console instead (adds the history-clear column):
-     `ALTER TABLE email_logs ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;`
-4. Check the **Tables** tab: you should see 12 tables, and `system_settings` should have 12 rows.
+   - **Updating an existing database?** Run in the Console (skip any statement that already exists):
+     ```
+     ALTER TABLE email_logs ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;
+     CREATE TABLE IF NOT EXISTS holidays (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       holiday_date TEXT NOT NULL,
+       name TEXT NOT NULL,
+       is_public INTEGER NOT NULL DEFAULT 0,
+       is_bank INTEGER NOT NULL DEFAULT 0,
+       is_mercantile INTEGER NOT NULL DEFAULT 0,
+       is_poya INTEGER NOT NULL DEFAULT 0,
+       source TEXT NOT NULL DEFAULT 'manual',
+       created_at INTEGER NOT NULL,
+       updated_at INTEGER NOT NULL,
+       UNIQUE (holiday_date, name)
+     );
+     CREATE INDEX IF NOT EXISTS idx_holidays_date ON holidays(holiday_date);
+     ```
+     Then open **Settings → Sri Lanka holidays → Auto-sync year** (e.g. 2026) to load data.
+4. Check the **Tables** tab: you should see the core tables plus `holidays`, and `system_settings` should have 12 rows.
 
 ## Step 3: Create the Pages project
 
@@ -132,7 +149,8 @@ Set `DEV_MODE` = `1` on the Pages project: OTPs are written to the function logs
 - Send single emails
 - Schedule one-time emails / reminders
 - Birthday & anniversary yearly greetings
-- **Sri Lanka calendar** — public, bank, mercantile & Poya holidays (2025–2027); tap any day to schedule an email reminder (uses your schedule limit)
+- **Sri Lanka calendar** — holidays stored in D1; tap any day to schedule an email reminder (uses your schedule limit)
+- **Admin holiday management** (Settings): auto-sync open Gazette-based JSON, upload JSON, or add/edit/delete manually (public / bank / mercantile / Poya)
 - Personal contacts, with import from vCard (.vcf) or CSV
 - Message templates with `{name}`, `{sender}`, `{year}`, `{email}`
 - Configurable per-user limits (admin)

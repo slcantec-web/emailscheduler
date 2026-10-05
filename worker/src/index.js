@@ -942,6 +942,197 @@ route('PUT', '/api/admin/settings', 'admin', async (c) => {
   return ok({ settings: await getSettings(c.env) });
 });
 
+/* ---------- holidays (Sri Lanka calendar) ---------- */
+const HOLIDAY_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const holidayOut = (r) => ({
+  id: r.id,
+  date: r.holiday_date,
+  name: r.name,
+  types: [
+    r.is_public ? 'public' : null,
+    r.is_bank ? 'bank' : null,
+    r.is_mercantile ? 'mercantile' : null,
+    r.is_poya ? 'poya' : null,
+  ].filter(Boolean),
+  is_public: !!r.is_public,
+  is_bank: !!r.is_bank,
+  is_mercantile: !!r.is_mercantile,
+  is_poya: !!r.is_poya,
+  source: r.source,
+  created_at: r.created_at,
+  updated_at: r.updated_at,
+});
+
+function parseHolidayFlags(raw) {
+  const types = [];
+  if (Array.isArray(raw.types)) types.push(...raw.types.map((t) => String(t).toLowerCase()));
+  if (Array.isArray(raw.categories)) types.push(...raw.categories.map((c) => String(c).toLowerCase()));
+  const has = (key) => {
+    if (raw[key] != null) return Number(raw[key]) ? 1 : 0;
+    const short = key.replace(/^is_/, '');
+    return types.some((t) => t === short || t.includes(short)) ? 1 : 0;
+  };
+  let is_public = has('is_public');
+  let is_bank = has('is_bank');
+  let is_mercantile = has('is_mercantile');
+  let is_poya = has('is_poya');
+  if (!is_public && !is_bank && !is_mercantile && !is_poya) is_public = 1;
+  return { is_public, is_bank, is_mercantile, is_poya };
+}
+
+function normalizeHolidayItem(raw) {
+  // Supports our format + Dilshan-H github JSON (summary/start/categories)
+  const date = String(raw.date || raw.holiday_date || raw.start || '').slice(0, 10);
+  const name = String(raw.name || raw.summary || '').trim().slice(0, 200);
+  if (!HOLIDAY_DATE_RE.test(date) || !name) return null;
+  return { date, name, ...parseHolidayFlags(raw) };
+}
+
+async function upsertHolidays(env, items, source, userId) {
+  const t = now();
+  let inserted = 0, updated = 0;
+  const stmts = [];
+  for (const it of items) {
+    const n = normalizeHolidayItem(it);
+    if (!n) continue;
+    stmts.push(
+      env.DB.prepare(
+        `INSERT INTO holidays(holiday_date,name,is_public,is_bank,is_mercantile,is_poya,source,created_at,updated_at)
+         VALUES(?,?,?,?,?,?,?,?,?)
+         ON CONFLICT(holiday_date,name) DO UPDATE SET
+           is_public=excluded.is_public, is_bank=excluded.is_bank, is_mercantile=excluded.is_mercantile,
+           is_poya=excluded.is_poya, source=excluded.source, updated_at=excluded.updated_at`
+      ).bind(n.date, n.name, n.is_public, n.is_bank, n.is_mercantile, n.is_poya, source, t, t)
+    );
+  }
+  if (stmts.length) {
+    const results = await env.DB.batch(stmts);
+    for (const r of results) {
+      if (r.meta && r.meta.changes) {
+        // SQLite: changes=1 could be insert or update; treat all as written
+        inserted += 1;
+      }
+    }
+  }
+  if (userId) await audit(env, userId, 'HOLIDAYS_UPSERT', 'holidays', null, { source, count: stmts.length });
+  return { written: stmts.length, inserted, updated };
+}
+
+// Any logged-in user can read holidays (calendar)
+route('GET', '/api/holidays', 'user', async (c) => {
+  const year = c.url.searchParams.get('year');
+  let sql = 'SELECT * FROM holidays';
+  const binds = [];
+  if (year && /^\d{4}$/.test(year)) {
+    sql += ' WHERE holiday_date >= ? AND holiday_date <= ?';
+    binds.push(`${year}-01-01`, `${year}-12-31`);
+  }
+  sql += ' ORDER BY holiday_date ASC, name ASC LIMIT 500';
+  const { results } = await c.env.DB.prepare(sql).bind(...binds).all();
+  return ok({ holidays: results.map(holidayOut), year: year || null });
+});
+
+route('GET', '/api/admin/holidays', 'admin', async (c) => {
+  const year = c.url.searchParams.get('year');
+  let sql = 'SELECT * FROM holidays';
+  const binds = [];
+  if (year && /^\d{4}$/.test(year)) {
+    sql += ' WHERE holiday_date >= ? AND holiday_date <= ?';
+    binds.push(`${year}-01-01`, `${year}-12-31`);
+  }
+  sql += ' ORDER BY holiday_date ASC, name ASC LIMIT 500';
+  const { results } = await c.env.DB.prepare(sql).bind(...binds).all();
+  const years = await c.env.DB.prepare(
+    `SELECT substr(holiday_date,1,4) AS y, COUNT(*) AS c FROM holidays GROUP BY y ORDER BY y DESC`
+  ).all();
+  return ok({ holidays: results.map(holidayOut), years: (years.results || []).map((r) => ({ year: r.y, count: r.c })), year: year || null });
+});
+
+route('POST', '/api/admin/holidays', 'admin', async (c) => {
+  const n = normalizeHolidayItem(c.body);
+  if (!n) throw new ApiError('INVALID_HOLIDAY', 'Provide date (YYYY-MM-DD) and name.');
+  const t = now();
+  try {
+    const r = await c.env.DB.prepare(
+      `INSERT INTO holidays(holiday_date,name,is_public,is_bank,is_mercantile,is_poya,source,created_at,updated_at)
+       VALUES(?,?,?,?,?,?,?,?,?)`
+    ).bind(n.date, n.name, n.is_public, n.is_bank, n.is_mercantile, n.is_poya, 'manual', t, t).run();
+    await audit(c.env, c.user.id, 'HOLIDAY_CREATE', 'holiday', String(r.meta.last_row_id), { date: n.date, name: n.name });
+    const row = await c.env.DB.prepare('SELECT * FROM holidays WHERE id=?').bind(r.meta.last_row_id).first();
+    return ok({ holiday: holidayOut(row) });
+  } catch (e) {
+    if (String(e.message || e).includes('UNIQUE')) throw new ApiError('DUPLICATE', 'That holiday already exists for this date.', 409);
+    throw e;
+  }
+});
+
+route('PUT', '/api/admin/holidays/:id', 'admin', async (c) => {
+  const id = Number(c.params.id);
+  const cur = await c.env.DB.prepare('SELECT * FROM holidays WHERE id=?').bind(id).first();
+  if (!cur) throw new ApiError('NOT_FOUND', 'Holiday not found.', 404);
+  const n = normalizeHolidayItem({ ...holidayOut(cur), ...c.body, date: c.body.date || cur.holiday_date, name: c.body.name || cur.name });
+  if (!n) throw new ApiError('INVALID_HOLIDAY', 'Invalid holiday data.');
+  const t = now();
+  await c.env.DB.prepare(
+    `UPDATE holidays SET holiday_date=?, name=?, is_public=?, is_bank=?, is_mercantile=?, is_poya=?, source=?, updated_at=? WHERE id=?`
+  ).bind(n.date, n.name, n.is_public, n.is_bank, n.is_mercantile, n.is_poya, cur.source || 'manual', t, id).run();
+  await audit(c.env, c.user.id, 'HOLIDAY_UPDATE', 'holiday', String(id), { date: n.date, name: n.name });
+  const row = await c.env.DB.prepare('SELECT * FROM holidays WHERE id=?').bind(id).first();
+  return ok({ holiday: holidayOut(row) });
+});
+
+route('DELETE', '/api/admin/holidays/:id', 'admin', async (c) => {
+  const id = Number(c.params.id);
+  const r = await c.env.DB.prepare('DELETE FROM holidays WHERE id=?').bind(id).run();
+  if (!r.meta.changes) throw new ApiError('NOT_FOUND', 'Holiday not found.', 404);
+  await audit(c.env, c.user.id, 'HOLIDAY_DELETE', 'holiday', String(id), {});
+  return ok({ deleted: 1 });
+});
+
+route('DELETE', '/api/admin/holidays', 'admin', async (c) => {
+  const year = c.url.searchParams.get('year') || c.body.year;
+  if (!year || !/^\d{4}$/.test(String(year))) throw new ApiError('INVALID_YEAR', 'Provide year=YYYY to clear.');
+  const r = await c.env.DB.prepare('DELETE FROM holidays WHERE holiday_date >= ? AND holiday_date <= ?')
+    .bind(`${year}-01-01`, `${year}-12-31`).run();
+  await audit(c.env, c.user.id, 'HOLIDAYS_CLEAR_YEAR', 'holidays', String(year), { removed: r.meta.changes });
+  return ok({ removed: r.meta.changes || 0, year: String(year) });
+});
+
+/** Bulk import: body.holidays = array of {date,name,types[]} or github format */
+route('POST', '/api/admin/holidays/import', 'admin', async (c) => {
+  const list = c.body.holidays || c.body.items || (Array.isArray(c.body) ? c.body : null);
+  if (!Array.isArray(list) || !list.length) throw new ApiError('INVALID_IMPORT', 'Send { holidays: [ ... ] }.');
+  if (list.length > 400) throw new ApiError('TOO_MANY', 'Max 400 holidays per import.');
+  const source = c.body.source === 'github' ? 'github' : 'import';
+  const result = await upsertHolidays(c.env, list, source, c.user.id);
+  return ok(result);
+});
+
+/**
+ * Auto-fetch official open data for a year from Dilshan-H/srilanka-holidays (GitHub raw JSON).
+ * No API key required. Admin must confirm the year.
+ */
+route('POST', '/api/admin/holidays/sync', 'admin', async (c) => {
+  const year = String(c.body.year || '').trim();
+  if (!/^\d{4}$/.test(year)) throw new ApiError('INVALID_YEAR', 'Provide year as YYYY (e.g. 2026).');
+  const y = Number(year);
+  if (y < 2020 || y > 2035) throw new ApiError('INVALID_YEAR', 'Year must be between 2020 and 2035.');
+  const url = `https://raw.githubusercontent.com/Dilshan-H/srilanka-holidays/main/json/${year}.json`;
+  let res;
+  try {
+    res = await fetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'EmailScheduler/1.0' } });
+  } catch (e) {
+    throw new ApiError('FETCH_FAILED', 'Could not reach holiday data source. Try again later.', 502);
+  }
+  if (res.status === 404) throw new ApiError('YEAR_NOT_AVAILABLE', `No open data file for ${year} yet. Add holidays manually or upload JSON.`, 404);
+  if (!res.ok) throw new ApiError('FETCH_FAILED', `Holiday source returned HTTP ${res.status}.`, 502);
+  let data;
+  try { data = await res.json(); } catch { throw new ApiError('BAD_DATA', 'Holiday source returned invalid JSON.', 502); }
+  if (!Array.isArray(data) || !data.length) throw new ApiError('BAD_DATA', 'Holiday source returned an empty list.', 502);
+  const result = await upsertHolidays(c.env, data, 'github', c.user.id);
+  return ok({ year, source: url, ...result, sample: data.slice(0, 3).map((x) => ({ date: x.start, name: x.summary, categories: x.categories })) });
+});
+
 /* ---------- request handler ---------- */
 async function handle(req, env, url) {
   try {

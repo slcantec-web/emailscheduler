@@ -1203,100 +1203,41 @@ async function pageProfile() {
   };
 }
 
-/* ---------- Sri Lanka holidays (Public / Bank / Mercantile / Poya) ---------- */
-/* Sources: Gazette Extraordinary (Holidays Act), Department of Government Printing.
-   Islamic dates may shift by one day subject to moon sighting. */
-const SL_HOLIDAYS = {
-  2025: [
-    { d: '2025-01-13', n: 'Duruthu Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2025-01-14', n: 'Tamil Thai Pongal Day', t: ['public', 'bank', 'mercantile'] },
-    { d: '2025-02-04', n: 'Independence Day', t: ['public', 'bank', 'mercantile'] },
-    { d: '2025-02-12', n: 'Navam Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2025-02-26', n: 'Maha Sivarathri Day', t: ['public', 'bank'] },
-    { d: '2025-03-13', n: 'Medin Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2025-03-31', n: 'Id-Ul-Fitr (Ramazan Festival Day)', t: ['public', 'bank'] },
-    { d: '2025-04-12', n: 'Bak Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2025-04-13', n: 'Day Prior to Sinhala & Tamil New Year Day', t: ['public', 'bank', 'mercantile'] },
-    { d: '2025-04-14', n: 'Sinhala & Tamil New Year Day', t: ['public', 'bank', 'mercantile'] },
-    { d: '2025-04-15', n: 'Special Bank Holiday', t: ['bank'] },
-    { d: '2025-04-18', n: 'Good Friday', t: ['public', 'bank'] },
-    { d: '2025-05-01', n: 'May Day (International Workers’ Day)', t: ['public', 'bank', 'mercantile'] },
-    { d: '2025-05-12', n: 'Vesak Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2025-05-13', n: 'Day Following Vesak Full Moon Poya Day', t: ['public', 'bank', 'mercantile'] },
-    { d: '2025-06-07', n: 'Id-Ul-Alha (Hadji Festival Day)', t: ['public', 'bank'] },
-    { d: '2025-06-10', n: 'Poson Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2025-07-10', n: 'Esala Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2025-08-08', n: 'Nikini Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2025-09-05', n: 'Milad-Un-Nabi (Holy Prophet’s Birthday)', t: ['public', 'bank', 'mercantile'] },
-    { d: '2025-09-07', n: 'Binara Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2025-10-06', n: 'Vap Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2025-10-20', n: 'Deepavali Festival Day', t: ['public', 'bank'] },
-    { d: '2025-11-05', n: 'Il Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2025-12-04', n: 'Unduvap Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2025-12-25', n: 'Christmas Day', t: ['public', 'bank', 'mercantile'] },
-  ],
-  2026: [
-    { d: '2026-01-03', n: 'Duruthu Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2026-01-15', n: 'Tamil Thai Pongal Day', t: ['public', 'bank', 'mercantile'] },
-    { d: '2026-02-01', n: 'Navam Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2026-02-04', n: 'Independence Day', t: ['public', 'bank', 'mercantile'] },
-    { d: '2026-02-15', n: 'Maha Sivarathri Day', t: ['public', 'bank'] },
-    { d: '2026-03-02', n: 'Medin Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2026-03-21', n: 'Id-Ul-Fitr (Ramazan Festival Day)', t: ['public', 'bank'] },
-    { d: '2026-04-01', n: 'Bak Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2026-04-03', n: 'Good Friday', t: ['public', 'bank'] },
-    { d: '2026-04-13', n: 'Day Prior to Sinhala & Tamil New Year Day', t: ['public', 'bank', 'mercantile'] },
-    { d: '2026-04-14', n: 'Sinhala & Tamil New Year Day', t: ['public', 'bank', 'mercantile'] },
-    { d: '2026-05-01', n: 'Vesak Full Moon Poya Day & May Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2026-05-02', n: 'Day Following Vesak Full Moon Poya Day', t: ['mercantile'] },
-    { d: '2026-05-28', n: 'Id-Ul-Alha (Hadji Festival Day)', t: ['public', 'bank'] },
-    { d: '2026-05-30', n: 'Adhi Poson Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2026-06-29', n: 'Poson Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2026-07-29', n: 'Esala Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2026-08-26', n: 'Milad-Un-Nabi (Holy Prophet’s Birthday)', t: ['public', 'bank', 'mercantile'] },
-    { d: '2026-08-27', n: 'Nikini Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2026-09-26', n: 'Binara Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2026-10-25', n: 'Vap Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2026-11-08', n: 'Deepavali Festival Day', t: ['public', 'bank'] },
-    { d: '2026-11-24', n: 'Il Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2026-12-23', n: 'Unduvap Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2026-12-25', n: 'Christmas Day', t: ['public', 'bank', 'mercantile'] },
-  ],
-  2027: [
-    { d: '2027-01-22', n: 'Duruthu Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2027-02-04', n: 'Independence Day', t: ['public', 'bank', 'mercantile'] },
-    { d: '2027-02-20', n: 'Navam Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2027-03-21', n: 'Medin Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2027-04-13', n: 'Day Prior to Sinhala & Tamil New Year Day', t: ['public', 'bank', 'mercantile'] },
-    { d: '2027-04-14', n: 'Sinhala & Tamil New Year Day', t: ['public', 'bank', 'mercantile'] },
-    { d: '2027-04-20', n: 'Bak Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2027-05-01', n: 'May Day (International Workers’ Day)', t: ['public', 'bank', 'mercantile'] },
-    { d: '2027-05-20', n: 'Vesak Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2027-05-21', n: 'Day Following Vesak Full Moon Poya Day', t: ['public', 'bank', 'mercantile'] },
-    { d: '2027-06-18', n: 'Poson Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2027-07-18', n: 'Esala Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2027-08-16', n: 'Nikini Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2027-09-15', n: 'Binara Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2027-10-14', n: 'Vap Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2027-11-13', n: 'Il Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2027-12-12', n: 'Unduvap Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
-    { d: '2027-12-25', n: 'Christmas Day', t: ['public', 'bank', 'mercantile'] },
-  ],
-};
+/* ---------- Sri Lanka holidays (DB-backed; admin sync/import/manual) ---------- */
 const HOLIDAY_TYPE_LABEL = { public: 'Public', bank: 'Bank', mercantile: 'Mercantile', poya: 'Poya' };
 const HOLIDAY_TYPE_CLASS = { public: 'h-pub', bank: 'h-bank', mercantile: 'h-merc', poya: 'h-poya' };
 
 let calYear = null, calMonth = null; // 0-based month
+let holidaysCache = {}; // year -> [{d,n,t}]
 
-function holidaysForMonth(y, m) {
-  const list = SL_HOLIDAYS[y] || [];
+function normalizeHolidayRows(list) {
+  return (list || []).map((h) => ({
+    d: h.date || h.d,
+    n: h.name || h.n,
+    t: h.types || h.t || [],
+    id: h.id,
+  })).filter((h) => h.d && h.n);
+}
+
+async function loadHolidaysYear(y) {
+  if (holidaysCache[y]) return holidaysCache[y];
+  try {
+    const data = await api('/api/holidays?year=' + y);
+    holidaysCache[y] = normalizeHolidayRows(data.holidays);
+  } catch {
+    holidaysCache[y] = [];
+  }
+  return holidaysCache[y];
+}
+
+function holidaysForMonth(list, y, m) {
   const prefix = `${y}-${String(m + 1).padStart(2, '0')}-`;
   return list.filter((h) => h.d.startsWith(prefix));
 }
 
-function holidayMapForYear(y) {
+function holidayMapFromList(list) {
   const map = {};
-  (SL_HOLIDAYS[y] || []).forEach((h) => { map[h.d] = h; });
+  list.forEach((h) => { map[h.d] = h; });
   return map;
 }
 
@@ -1307,7 +1248,6 @@ async function pageCalendar() {
     calYear = yy;
     calMonth = mm - 1;
   }
-  // Load schedules to mark days that already have a reminder
   let scheduleDates = {};
   try {
     const data = await api('/api/schedules');
@@ -1321,14 +1261,14 @@ async function pageCalendar() {
     });
   } catch { /* ignore */ }
 
-  const render = () => {
+  const render = async () => {
     const y = calYear, m = calMonth;
+    const yearList = await loadHolidaysYear(y);
     const first = new Date(Date.UTC(y, m, 1));
     const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
-    // Mon=0 … Sun=6 for Sri Lanka-friendly week start
     let startDow = (first.getUTCDay() + 6) % 7;
-    const hMap = holidayMapForYear(y);
-    const monthHolidays = holidaysForMonth(y, m);
+    const hMap = holidayMapFromList(yearList);
+    const monthHolidays = holidaysForMonth(yearList, y, m);
     const cells = [];
     for (let i = 0; i < startDow; i++) cells.push('<div class="cal-cell empty"></div>');
     for (let day = 1; day <= daysInMonth; day++) {
@@ -1360,18 +1300,19 @@ async function pageCalendar() {
         ${h ? `<span class="hname">${esc(h.n.split(' ').slice(0, 2).join(' '))}</span>` : ''}
       </button>`);
     }
-    const canPrev = y > 2025 || (y === 2025 && m > 0);
-    const canNext = y < 2027 || (y === 2027 && m < 11);
+    const emptyNote = yearList.length
+      ? ''
+      : `<p class="muted small" style="margin-top:10px">No holidays loaded for ${y}. An admin can sync or upload them under <strong>Settings → Holidays</strong>.</p>`;
     $('#main').innerHTML = `
     <div class="page-head">
       <h2>Calendar</h2>
       <button class="btn right" id="cal-today">Today</button>
     </div>
-    <p class="muted small" style="margin-bottom:12px">Sri Lankan public, bank, mercantile &amp; Poya holidays. Tap any day to schedule an email reminder (counts toward your schedule limit).</p>
+    <p class="muted small" style="margin-bottom:12px">Sri Lankan public, bank, mercantile &amp; Poya holidays (managed by admin). Tap any day to schedule an email reminder.</p>
     <div class="cal-nav">
-      <button type="button" class="btn ghost iconbtn" id="cal-prev" ${canPrev ? '' : 'disabled'} aria-label="Previous month">${ic('back')}</button>
+      <button type="button" class="btn ghost iconbtn" id="cal-prev" aria-label="Previous month">${ic('back')}</button>
       <div class="cal-title">${MONTHS[m]} ${y}</div>
-      <button type="button" class="btn ghost iconbtn" id="cal-next" ${canNext ? '' : 'disabled'} aria-label="Next month"><svg class="icon-svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
+      <button type="button" class="btn ghost iconbtn" id="cal-next" aria-label="Next month"><svg class="icon-svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
     </div>
     <div class="cal-grid">
       <div class="cal-dow">Mon</div><div class="cal-dow">Tue</div><div class="cal-dow">Wed</div><div class="cal-dow">Thu</div><div class="cal-dow">Fri</div><div class="cal-dow">Sat</div><div class="cal-dow">Sun</div>
@@ -1384,17 +1325,18 @@ async function pageCalendar() {
       <span><i class="cdot bank"></i> Bank only</span>
       <span><i class="cdot rem"></i> Your reminder</span>
     </div>
+    ${emptyNote}
     ${monthHolidays.length ? `
     <div class="sec-title" style="margin-top:18px">Holidays this month</div>
     <div class="list cal-hlist">${monthHolidays.map((h) => `
       <div class="card item cal-hitem" data-date="${h.d}">
         <div class="row">
           <strong>${esc(h.d.slice(8))}/${esc(h.d.slice(5, 7))}</strong>
-          <span class="cal-tags">${h.t.map((t) => `<span class="htag ${HOLIDAY_TYPE_CLASS[t]}">${HOLIDAY_TYPE_LABEL[t]}</span>`).join('')}</span>
+          <span class="cal-tags">${h.t.map((t) => `<span class="htag ${HOLIDAY_TYPE_CLASS[t] || ''}">${HOLIDAY_TYPE_LABEL[t] || esc(t)}</span>`).join('')}</span>
         </div>
         <div class="small" style="margin-top:4px">${esc(h.n)}</div>
         <div class="actions"><button class="btn ghost smallbtn" data-remind="${h.d}">+ Reminder</button></div>
-      </div>`).join('')}</div>` : '<p class="muted small" style="margin-top:14px">No official holidays this month.</p>'}
+      </div>`).join('')}</div>` : '<p class="muted small" style="margin-top:14px">No holidays this month.</p>'}
     <p class="muted small" style="margin-top:14px">Islamic festival dates may shift by one day subject to moon sighting. Official gazette takes priority.</p>`;
 
     $('#cal-prev').onclick = () => {
@@ -1421,7 +1363,7 @@ async function pageCalendar() {
     $$('.cal-cell.day').forEach((el) => el.onclick = () => openDay(el.dataset.date));
     $$('[data-remind]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); openDay(b.dataset.remind); });
   };
-  render();
+  await render();
 }
 
 async function pageMore() {
@@ -1615,6 +1557,7 @@ async function pageSettings() {
         ? `<div class="switch"><span class="small muted">Off / On</span><input type="checkbox" name="${x.k}" ${Number(s[x.k]) === 1 ? 'checked' : ''}></div>`
         : `<input name="${x.k}" type="number" min="${x.min ?? 0}" ${x.max ? `max="${x.max}"` : ''} value="${esc(s[x.k] ?? '')}">`}
     </div>`;
+  const thisYear = Number(slDate(0).slice(0, 4));
   $('#main').innerHTML = `
   <div class="page-head"><h2>System settings</h2></div>
   <form id="sf">
@@ -1623,7 +1566,25 @@ async function pageSettings() {
       ${g.note ? `<p class="muted small" style="margin:-4px 2px 10px">${esc(g.note)}</p>` : ''}
       <div class="tiles tiles-settings">${g.tiles.map(tileHtml).join('')}</div>`).join('')}
     <div class="savebar"><span class="muted small">Changes apply right after saving.</span><button class="btn">Save settings</button></div>
-  </form>`;
+  </form>
+  <div class="sec-title" style="margin-top:28px">Sri Lanka holidays</div>
+  <p class="muted small" style="margin:-4px 2px 12px">Powers the Calendar for all users. Prefer <strong>auto-sync</strong> from open government-sourced data, or add/upload manually.</p>
+  <div class="card" id="hol-panel">
+    <div class="row" style="flex-wrap:wrap;gap:8px;align-items:flex-end">
+      <div style="min-width:100px">
+        <label>Year</label>
+        <input type="number" id="hol-year" min="2020" max="2035" value="${thisYear}" style="width:110px">
+      </div>
+      <button type="button" class="btn" id="hol-sync">Auto-sync year</button>
+      <button type="button" class="btn ghost" id="hol-load">Refresh list</button>
+      <button type="button" class="btn ghost" id="hol-add">+ Add holiday</button>
+      <label class="btn ghost" style="cursor:pointer;margin:0">Upload JSON<input type="file" id="hol-file" accept="application/json,.json" hidden></label>
+      <button type="button" class="btn ghost danger" id="hol-clear">Clear year</button>
+    </div>
+    <p class="muted small" style="margin-top:10px">Auto-sync fetches open-source Gazette-based data from <a href="https://github.com/Dilshan-H/srilanka-holidays" target="_blank" rel="noopener">srilanka-holidays</a> (no API key). You can also upload a JSON array or add rows one by one.</p>
+    <div id="hol-years" class="muted small" style="margin-top:8px"></div>
+    <div id="hol-list" style="margin-top:12px"></div>
+  </div>`;
   $('#sf').onsubmit = (e) => {
     e.preventDefault();
     const d = fd(e.target);
@@ -1633,6 +1594,119 @@ async function pageSettings() {
       toast('Settings saved', 'good');
     });
   };
+  const holYear = () => String($('#hol-year').value || thisYear);
+  const renderHolList = async () => {
+    const y = holYear();
+    $('#hol-list').innerHTML = loading();
+    try {
+      const data = await api('/api/admin/holidays?year=' + encodeURIComponent(y));
+      holidaysCache = {};
+      const years = data.years || [];
+      $('#hol-years').textContent = years.length
+        ? 'Loaded years: ' + years.map((r) => `${r.year} (${r.count})`).join(' · ')
+        : 'No holidays in database yet.';
+      const list = data.holidays || [];
+      if (!list.length) {
+        $('#hol-list').innerHTML = `<p class="muted">No holidays for ${esc(y)}. Use <strong>Auto-sync year</strong> or upload JSON.</p>`;
+        return;
+      }
+      $('#hol-list').innerHTML = `<div class="list">${list.map((h) => `
+        <div class="card item">
+          <div class="row"><strong>${esc(h.date)}</strong>
+            <span class="cal-tags">${(h.types || []).map((t) => `<span class="htag ${HOLIDAY_TYPE_CLASS[t] || ''}">${HOLIDAY_TYPE_LABEL[t] || esc(t)}</span>`).join('')}</span>
+          </div>
+          <div class="small" style="margin-top:4px">${esc(h.name)}</div>
+          <div class="muted small">Source: ${esc(h.source || '—')}</div>
+          <div class="actions">
+            <button class="btn ghost smallbtn" data-hedit="${h.id}">Edit</button>
+            <button class="btn ghost danger smallbtn" data-hdel="${h.id}">Delete</button>
+          </div>
+        </div>`).join('')}</div>`;
+      $$('[data-hdel]').forEach((b) => b.onclick = async () => {
+        if (!(await confirmBox('Delete holiday', 'Remove this holiday from the calendar?', 'Delete'))) return;
+        try {
+          await api('/api/admin/holidays/' + b.dataset.hdel, 'DELETE');
+          toast('Deleted', 'good');
+          renderHolList();
+        } catch (err) { toast(err.message, 'err'); }
+      });
+      $$('[data-hedit]').forEach((b) => {
+        const h = list.find((x) => String(x.id) === b.dataset.hedit);
+        if (h) b.onclick = () => holidayForm(h, renderHolList);
+      });
+    } catch (err) {
+      $('#hol-list').innerHTML = `<p class="muted">${esc(err.message)}</p>
+        <p class="muted small">If the table is missing, run the <code>holidays</code> CREATE TABLE from schema.sql in the D1 Console.</p>`;
+    }
+  };
+  $('#hol-load').onclick = () => renderHolList();
+  $('#hol-year').onchange = () => renderHolList();
+  $('#hol-sync').onclick = async () => {
+    const y = holYear();
+    if (!(await confirmBox('Auto-sync holidays', `Fetch open-source Sri Lanka holidays for ${y} and merge into the database? Matching date+name rows are updated.`, 'Sync'))) return;
+    withBtn($('#hol-sync'), async () => {
+      const r = await api('/api/admin/holidays/sync', 'POST', { year: Number(y) });
+      toast(`Synced ${r.written || 0} holidays for ${y}`, 'good');
+      renderHolList();
+    });
+  };
+  $('#hol-clear').onclick = async () => {
+    const y = holYear();
+    if (!(await confirmBox('Clear year', `Delete ALL holidays for ${y}? This cannot be undone.`, 'Clear'))) return;
+    try {
+      const r = await api('/api/admin/holidays?year=' + encodeURIComponent(y), 'DELETE');
+      toast(`Removed ${r.removed || 0}`, 'good');
+      renderHolList();
+    } catch (err) { toast(err.message, 'err'); }
+  };
+  $('#hol-add').onclick = () => holidayForm({ date: `${holYear()}-01-01`, name: '', types: ['public'] }, renderHolList);
+  $('#hol-file').onchange = async (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    ev.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const holidays = Array.isArray(parsed) ? parsed : (parsed.holidays || parsed.items || []);
+      if (!Array.isArray(holidays) || !holidays.length) throw new Error('JSON must be an array of holidays, or { holidays: [...] }.');
+      const r = await api('/api/admin/holidays/import', 'POST', { holidays, source: 'import' });
+      toast(`Imported ${r.written || 0} holidays`, 'good');
+      renderHolList();
+    } catch (err) { toast(err.message || 'Import failed', 'err'); }
+  };
+  renderHolList();
+}
+
+function holidayForm(h, onDone) {
+  const types = h.types || [];
+  const chk = (t) => types.includes(t) ? 'checked' : '';
+  modal(`<h3>${h.id ? 'Edit holiday' : 'Add holiday'}</h3>
+  <form id="hf">
+    <label>Date</label><input name="date" type="date" value="${esc(h.date || '')}" required>
+    <label>Name</label><input name="name" maxlength="200" value="${esc(h.name || '')}" required>
+    <label>Types</label>
+    <div class="daybtns" style="margin-bottom:12px">
+      <label class="daychip"><input type="checkbox" name="types" value="public" ${chk('public')}><span>Public</span></label>
+      <label class="daychip"><input type="checkbox" name="types" value="bank" ${chk('bank')}><span>Bank</span></label>
+      <label class="daychip"><input type="checkbox" name="types" value="mercantile" ${chk('mercantile')}><span>Mercantile</span></label>
+      <label class="daychip"><input type="checkbox" name="types" value="poya" ${chk('poya')}><span>Poya</span></label>
+    </div>
+    <button class="btn block">${h.id ? 'Save' : 'Add'}</button>
+  </form>`, (sheet, close) => {
+    $('#hf', sheet).onsubmit = (e) => {
+      e.preventDefault();
+      const date = $('[name=date]', sheet).value;
+      const name = $('[name=name]', sheet).value.trim();
+      const typesSel = $$('input[name=types]:checked', sheet).map((x) => x.value);
+      withBtn($('.btn', sheet), async () => {
+        if (h.id) await api('/api/admin/holidays/' + h.id, 'PUT', { date, name, types: typesSel });
+        else await api('/api/admin/holidays', 'POST', { date, name, types: typesSel });
+        toast(h.id ? 'Updated' : 'Added', 'good');
+        close();
+        if (onDone) onDone();
+      });
+    };
+  });
 }
 
 /* ---------- boot ---------- */

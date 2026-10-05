@@ -159,6 +159,23 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at INTEGER NOT NULL
 );
 
+-- Sri Lanka holidays (admin-managed: manual, JSON import, or sync from open data)
+CREATE TABLE IF NOT EXISTS holidays (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  holiday_date TEXT NOT NULL,
+  name TEXT NOT NULL,
+  is_public INTEGER NOT NULL DEFAULT 0,
+  is_bank INTEGER NOT NULL DEFAULT 0,
+  is_mercantile INTEGER NOT NULL DEFAULT 0,
+  is_poya INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'manual',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE (holiday_date, name)
+);
+CREATE INDEX IF NOT EXISTS idx_holidays_date ON holidays(holiday_date);
+CREATE INDEX IF NOT EXISTS idx_holidays_year ON holidays(holiday_date);
+
 INSERT OR IGNORE INTO system_settings (setting_key, setting_value, updated_at) VALUES
  ('max_user_scheduled_messages','5',strftime('%s','now')),
  ('max_daily_emails','30',strftime('%s','now')),
@@ -172,3 +189,5 @@ INSERT OR IGNORE INTO system_settings (setting_key, setting_value, updated_at) V
  ('allow_custom_sender_name','1',strftime('%s','now')),
  ('registration_enabled','1',strftime('%s','now')),
  ('bulk_batch_size','20',strftime('%s','now'));
+
+-- Existing D1 databases: run the holidays CREATE TABLE + indexes above once in the Console.
