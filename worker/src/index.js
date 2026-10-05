@@ -760,17 +760,8 @@ async function listCampaigns(c, all) {
   const { results } = await (all ? st : st.bind(c.user.id)).all();
   return ok({ campaigns: results, max_recipients: c.settings.max_bulk_recipients });
 }
-async function createCampaign(c) {
-  const b = c.body, isAdmin = c.user.role === 'ADMIN';
-  const rawSubject = clean(b.subject, MAX_SUBJECT + 1);
-  const name = clean(b.campaign_name, 80) || clean(rawSubject, 80);
-  if (!name) throw new ApiError('INVALID_NAME', 'Campaign name or subject is required.');
-  const subject = rawSubject || name;
-  validateTemplate(subject, MAX_SUBJECT);
-  const msg = clean(b.message, MAX_MSG + 1);
-  validateTemplate(msg);
-
-  // recipients: typed emails + selected contacts (contacts supply names for {name})
+/** typed emails + selected contacts -> Map(email -> name). Contacts supply names for {name}. */
+async function collectRecipients(c, b) {
   const found = new Map();
   let bad = 0;
   const add = (email, nm) => {
@@ -794,17 +785,10 @@ async function createCampaign(c) {
     for (const r of results) add(r.email, r.name);
   }
   if (bad) throw new ApiError('INVALID_EMAIL', 'One or more recipient emails are invalid.');
-  const emails = [...found.keys()];
-  if (!emails.length) throw new ApiError('NO_RECIPIENTS', 'Add at least one recipient.');
-  if (emails.length > c.settings.max_bulk_recipients) throw new ApiError('TOO_MANY_RECIPIENTS', `Maximum ${c.settings.max_bulk_recipients} recipients per campaign.`);
-
-  if (!isAdmin) {
-    if (!(await rateLimit(c.env, `camp:${c.user.id}`, 10, 3600))) throw new ApiError('RATE_LIMIT', 'Too many campaigns created. Try again later.', 429);
-    const pend = await c.env.DB.prepare("SELECT COUNT(*) c FROM email_campaign_recipients r JOIN email_campaigns k ON k.id=r.campaign_id WHERE k.created_by=? AND r.status IN ('PENDING','PROCESSING')").bind(c.user.id).first();
-    await checkQuota(c.env, c.user, c.settings, emails.length + pend.c);
-  }
-
-  const t = now();
+  return found;
+}
+/** Send-now / one-time date / repeat settings -> { at, rep } */
+function campaignSchedule(b, t) {
   let at = t, rep = null;
   const rtype = clean(b.repeat, 10).toUpperCase();
   if (rtype) {
@@ -818,6 +802,31 @@ async function createCampaign(c) {
     if (!at) throw new ApiError('INVALID_DATE', 'Invalid schedule date/time.');
     if (at < t - 60) throw new ApiError('PAST_DATE', 'Schedule time must be in the future.');
   }
+  return { at, rep };
+}
+async function createCampaign(c) {
+  const b = c.body, isAdmin = c.user.role === 'ADMIN';
+  const rawSubject = clean(b.subject, MAX_SUBJECT + 1);
+  const name = clean(b.campaign_name, 80) || clean(rawSubject, 80);
+  if (!name) throw new ApiError('INVALID_NAME', 'Campaign name or subject is required.');
+  const subject = rawSubject || name;
+  validateTemplate(subject, MAX_SUBJECT);
+  const msg = clean(b.message, MAX_MSG + 1);
+  validateTemplate(msg);
+
+  const found = await collectRecipients(c, b);
+  const emails = [...found.keys()];
+  if (!emails.length) throw new ApiError('NO_RECIPIENTS', 'Add at least one recipient.');
+  if (emails.length > c.settings.max_bulk_recipients) throw new ApiError('TOO_MANY_RECIPIENTS', `Maximum ${c.settings.max_bulk_recipients} recipients per campaign.`);
+
+  if (!isAdmin) {
+    if (!(await rateLimit(c.env, `camp:${c.user.id}`, 10, 3600))) throw new ApiError('RATE_LIMIT', 'Too many campaigns created. Try again later.', 429);
+    const pend = await c.env.DB.prepare("SELECT COUNT(*) c FROM email_campaign_recipients r JOIN email_campaigns k ON k.id=r.campaign_id WHERE k.created_by=? AND r.status IN ('PENDING','PROCESSING')").bind(c.user.id).first();
+    await checkQuota(c.env, c.user, c.settings, emails.length + pend.c);
+  }
+
+  const t = now();
+  const { at, rep } = campaignSchedule(b, t);
   const sender = isAdmin ? clean(b.sender_name, 60) : resolveSender(c.settings, c.user, b.sender_name || undefined);
   const r = await c.env.DB.prepare('INSERT INTO email_campaigns(created_by,campaign_name,subject,message,sender_name,scheduled_at,status,created_at,repeat_type,repeat_rule,repeat_time) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
     .bind(c.user.id, name, subject, msg, sender || c.user.sender_name || null, at, 'SCHEDULED', t, rep ? rep.type : null, rep ? rep.rule : null, rep ? rep.time : null).run();
@@ -826,6 +835,60 @@ async function createCampaign(c) {
   for (let i = 0; i < stmts.length; i += 90) await c.env.DB.batch(stmts.slice(i, i + 90));
   await audit(c.env, c.user.id, 'CAMPAIGN_CREATED', 'campaign', id, { recipients: emails.length });
   return ok({ id, recipients: emails.length });
+}
+async function getCampaign(c, all) {
+  const id = Number(c.params.id);
+  const camp = await c.env.DB.prepare(`SELECT * FROM email_campaigns WHERE id=? ${all ? '' : 'AND created_by=?'}`).bind(...(all ? [id] : [id, c.user.id])).first();
+  if (!camp) throw new ApiError('NOT_FOUND', 'Campaign not found.', 404);
+  const { results } = await c.env.DB.prepare('SELECT id,recipient_email,recipient_name,status,error_message,sent_at FROM email_campaign_recipients WHERE campaign_id=? ORDER BY id LIMIT 2000').bind(camp.id).all();
+  return ok({ campaign: camp, recipients: results });
+}
+/** Edit a scheduled/running campaign: text, schedule (scheduled only) and recipients (add / remove unsent ones). */
+async function editCampaign(c, all) {
+  const id = Number(c.params.id), b = c.body, isAdmin = c.user.role === 'ADMIN';
+  const camp = await c.env.DB.prepare(`SELECT * FROM email_campaigns WHERE id=? ${all ? '' : 'AND created_by=?'}`).bind(...(all ? [id] : [id, c.user.id])).first();
+  if (!camp) throw new ApiError('NOT_FOUND', 'Campaign not found.', 404);
+  if (!['SCHEDULED', 'RUNNING'].includes(camp.status)) throw new ApiError('NOT_EDITABLE', 'Only scheduled or running campaigns can be edited.', 409);
+  const subject = b.subject !== undefined ? clean(b.subject, MAX_SUBJECT + 1) : camp.subject;
+  if (!subject) throw new ApiError('INVALID_NAME', 'Subject is required.');
+  validateTemplate(subject, MAX_SUBJECT);
+  const msg = b.message !== undefined ? clean(b.message, MAX_MSG + 1) : camp.message;
+  validateTemplate(msg);
+  const name = clean(b.campaign_name, 80) || camp.campaign_name;
+  const t = now();
+  let at = camp.scheduled_at;
+  let rep = camp.repeat_type ? { type: camp.repeat_type, rule: camp.repeat_rule, time: camp.repeat_time } : null;
+  if (camp.status === 'SCHEDULED' && (b.repeat !== undefined || b.date !== undefined || b.time !== undefined)) ({ at, rep } = campaignSchedule(b, t));
+  const sender = b.sender_name !== undefined ? (isAdmin ? clean(b.sender_name, 60) : resolveSender(c.settings, c.user, b.sender_name || undefined)) : (camp.sender_name || '');
+
+  // recipients: plan first (validate), apply after the campaign row is updated
+  let toAdd = [], toRemove = [], skipped = 0, found = null;
+  if (b.recipients !== undefined || b.contact_ids !== undefined) {
+    found = await collectRecipients(c, b);
+    const { results: ex } = await c.env.DB.prepare('SELECT id,recipient_email,status FROM email_campaign_recipients WHERE campaign_id=?').bind(id).all();
+    const have = new Map(ex.map((r) => [r.recipient_email, r]));
+    toAdd = [...found.keys()].filter((e) => !have.has(e));
+    skipped = [...found.keys()].filter((e) => have.has(e) && !['PENDING', 'PROCESSING'].includes(have.get(e).status)).length;
+    toRemove = ex.filter((r) => r.status === 'PENDING' && !found.has(r.recipient_email));
+    const open = ex.filter((r) => ['PENDING', 'PROCESSING'].includes(r.status)).length - toRemove.length + toAdd.length;
+    if (open < 1) throw new ApiError('NO_RECIPIENTS', 'A campaign needs at least one unsent recipient. Use Delete to remove the whole campaign.');
+    if (ex.length - toRemove.length + toAdd.length > c.settings.max_bulk_recipients) throw new ApiError('TOO_MANY_RECIPIENTS', `Maximum ${c.settings.max_bulk_recipients} recipients per campaign.`);
+    if (!isAdmin && toAdd.length) {
+      const pend = await c.env.DB.prepare("SELECT COUNT(*) c FROM email_campaign_recipients r JOIN email_campaigns k ON k.id=r.campaign_id WHERE k.created_by=? AND r.status IN ('PENDING','PROCESSING')").bind(c.user.id).first();
+      await checkQuota(c.env, c.user, c.settings, pend.c - toRemove.length + toAdd.length);
+    }
+  }
+  const u = await c.env.DB.prepare("UPDATE email_campaigns SET campaign_name=?,subject=?,message=?,sender_name=?,scheduled_at=?,repeat_type=?,repeat_rule=?,repeat_time=? WHERE id=? AND status IN ('SCHEDULED','RUNNING')")
+    .bind(name, subject, msg, sender || c.user.sender_name || null, at, rep ? rep.type : null, rep ? rep.rule : null, rep ? rep.time : null, id).run();
+  if (!u.meta.changes) throw new ApiError('NOT_EDITABLE', 'This campaign has just finished and can no longer be edited.', 409);
+  for (let i = 0; i < toRemove.length; i += 80) {
+    const part = toRemove.slice(i, i + 80).map((r) => r.id);
+    await c.env.DB.prepare(`DELETE FROM email_campaign_recipients WHERE campaign_id=? AND status='PENDING' AND id IN (${part.map(() => '?').join(',')})`).bind(id, ...part).run();
+  }
+  const stmts = toAdd.map((e) => c.env.DB.prepare('INSERT INTO email_campaign_recipients(campaign_id,recipient_email,recipient_name,status,created_at) VALUES(?,?,?,?,?)').bind(id, e, found.get(e) || null, 'PENDING', t));
+  for (let i = 0; i < stmts.length; i += 90) await c.env.DB.batch(stmts.slice(i, i + 90));
+  await audit(c.env, c.user.id, 'CAMPAIGN_EDITED', 'campaign', id, { added: toAdd.length, removed: toRemove.length });
+  return ok({ added: toAdd.length, removed: toRemove.length, skipped });
 }
 async function cancelCampaign(c, all) {
   const id = Number(c.params.id);
@@ -857,12 +920,10 @@ route('GET', '/api/admin/campaigns', 'admin', (c) => listCampaigns(c, true));
 route('POST', '/api/admin/campaigns', 'admin', (c) => createCampaign(c));
 route('GET', '/api/campaigns', 'user', (c) => listCampaigns(c, false));
 route('POST', '/api/campaigns', 'user', (c) => createCampaign(c));
-route('GET', '/api/admin/campaigns/:id', 'admin', async (c) => {
-  const camp = await c.env.DB.prepare('SELECT * FROM email_campaigns WHERE id=?').bind(Number(c.params.id)).first();
-  if (!camp) throw new ApiError('NOT_FOUND', 'Campaign not found.', 404);
-  const { results } = await c.env.DB.prepare('SELECT recipient_email,recipient_name,status,error_message,sent_at FROM email_campaign_recipients WHERE campaign_id=? ORDER BY id LIMIT 500').bind(camp.id).all();
-  return ok({ campaign: camp, recipients: results });
-});
+route('GET', '/api/admin/campaigns/:id', 'admin', (c) => getCampaign(c, true));
+route('GET', '/api/campaigns/:id', 'user', (c) => getCampaign(c, false));
+route('PUT', '/api/admin/campaigns/:id', 'admin', (c) => editCampaign(c, true));
+route('PUT', '/api/campaigns/:id', 'user', (c) => editCampaign(c, false));
 route('POST', '/api/admin/campaigns/:id/cancel', 'admin', (c) => cancelCampaign(c, true));
 route('POST', '/api/campaigns/:id/cancel', 'user', (c) => cancelCampaign(c, false));
 route('GET', '/api/admin/settings', 'admin', async (c) => ok({ settings: c.settings }));

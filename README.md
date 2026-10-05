@@ -138,6 +138,7 @@ Set `DEV_MODE` = `1` on the Pages project: OTPs are written to the function logs
 - Contact search, multi-select and bulk email (campaigns) for every user; type-ahead and a contact picker on email fields
 - Audit-friendly email history, with Clear history
 - Delete / Cancel all / Clear finished for schedules and campaigns
+- Edit a scheduled or running campaign (message, schedule, add/remove recipients)
 - Repeat on chosen days of the week (e.g. weekdays only)
 - Compact contact list with bulk delete
 - PWA-ready frontend

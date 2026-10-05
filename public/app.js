@@ -908,9 +908,34 @@ function chipsInput(root, initial = []) {
 }
 
 /* bulk email: from selected contacts (Contacts page) or from scratch (Campaigns page) */
-async function campaignForm({ contacts = [], onDone } = {}) {
+/* fill the repeat / schedule fields of the campaign form from a saved campaign */
+function fillCampaignSchedule(root, c) {
+  const rep = $('#rep', root);
+  if (!rep) return;
+  const setv = (n, v) => { const el = $(`[name="${n}"]`, root); if (el) el.value = v; };
+  if (c.repeat_type) {
+    rep.value = c.repeat_type;
+    rep.dispatchEvent(new Event('change'));
+    setv('time', c.repeat_time || '09:00');
+    const r = c.repeat_rule || '';
+    if (['DAILY', 'WEEKLY'].includes(c.repeat_type)) {
+      const on = !r || r === 'daily' ? ['0', '1', '2', '3', '4', '5', '6'] : r.split(',');
+      $$('input[name="days"]', root).forEach((x) => { x.checked = on.includes(x.value); });
+    } else if (c.repeat_type === 'MONTHLY') setv('day_of_month', r);
+    else if (c.repeat_type === 'YEARLY') setv('date', `${slDate(0).slice(0, 4)}-${r}`);
+  } else if (c.scheduled_at * 1000 > Date.now() + 60000) {
+    const d = new Date(c.scheduled_at * 1000);
+    setv('date', new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Colombo' }).format(d));
+    setv('time', new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Colombo', hour: '2-digit', minute: '2-digit', hour12: false }).format(d));
+  }
+}
+/* edit = { campaign, recipients } to edit an existing scheduled/running campaign (change text, schedule, add/remove recipients) */
+async function campaignForm({ contacts = [], onDone, edit = null } = {}) {
   try { await getContacts(); } catch { /* picker will report */ }
-  modal(`<h3>${contacts.length ? 'Email selected contacts' : 'New campaign'}</h3>
+  const running = !!(edit && edit.campaign.status === 'RUNNING');
+  const sentCount = edit ? edit.recipients.filter((r) => !['PENDING', 'PROCESSING'].includes(r.status)).length : 0;
+  const openRecipients = edit ? edit.recipients.filter((r) => ['PENDING', 'PROCESSING'].includes(r.status)).map((r) => ({ email: r.recipient_email, name: r.recipient_name || '' })) : contacts;
+  modal(`<h3>${edit ? 'Edit campaign' : contacts.length ? 'Email selected contacts' : 'New campaign'}</h3>
   <form id="cf">
     <div class="cf-grid"><div class="cf-col">
     <label>Recipients</label>
@@ -923,25 +948,34 @@ async function campaignForm({ contacts = [], onDone } = {}) {
       <button type="button" class="linkbtn" id="allc">All</button>
       <button type="button" class="linkbtn" id="clrc">Clear</button></div>
     <p class="hint">Paste a whole list at once (commas, spaces or new lines). Start typing a name to pick from your contacts.</p>
+    ${edit ? `<p class="hint">Add or remove recipients here.${sentCount ? ` ${sentCount} already sent/failed — those are not affected and will not be sent again.` : ''}</p>` : ''}
     </div><div class="cf-col">
     <label>Subject</label><input name="subject" maxlength="200" required>
     <label>Message</label><textarea name="message" rows="5" maxlength="5000" required placeholder="Hi {name}, ..."></textarea>
     <p class="hint">Variables: {name} {sender} {year} {email}. {name} comes from the contact.</p>
     <label>Campaign name (optional)</label><input name="campaign_name" maxlength="80" placeholder="For your own reference">
     <label>From name (optional)</label><input name="sender_name" maxlength="60" placeholder="${esc(me.sender_name || me.display_name || '')}">
-    ${repeatSelectHtml()}
+    ${running ? '<p class="hint">This campaign is already sending, so its schedule cannot change. You can edit the message and recipients.</p>' : repeatSelectHtml()}
     <p class="hint">Bulk emails are sent in small batches every minute.</p>
     </div></div>
-    <button class="btn block">Send</button>
+    <button class="btn block">${edit ? 'Save changes' : 'Send'}</button>
   </form>`, (sheet, close) => {
-    const chips = chipsInput(sheet, contacts);
+    const chips = chipsInput(sheet, openRecipients);
     $('#pickc', sheet).onclick = () => chips.pick();
     $('#allc', sheet).onclick = () => chips.addAll();
     $('#clrc', sheet).onclick = () => chips.clear();
-    bindRepeat(sheet, `<div class="grid2">
+    if (!running) bindRepeat(sheet, `<div class="grid2">
       <div><label>Date (blank = send now)</label><input name="date" type="date"></div>
       <div><label>Time (Colombo)</label><input name="time" type="time" value="09:00"></div>
     </div>`);
+    if (edit) {
+      const f = $('#cf', sheet), ec = edit.campaign;
+      f.subject.value = ec.subject || '';
+      f.message.value = ec.message || '';
+      f.campaign_name.value = ec.campaign_name || '';
+      f.sender_name.value = ec.sender_name || '';
+      if (!running) fillCampaignSchedule(sheet, ec);
+    }
     $('#cf', sheet).onsubmit = (e) => {
       e.preventDefault();
       if (!chips.flush()) { toast('One of the emails is not valid. Fix or clear it first.', 'err'); return; }
@@ -949,12 +983,20 @@ async function campaignForm({ contacts = [], onDone } = {}) {
       if (!all.length) { toast('Add at least one recipient.', 'err'); return; }
       const d = repeatPayload(fd(e.target), e.target);
       d.contact_ids = all.filter((c) => c.id).map((c) => c.id);
-      d.recipients = all.filter((c) => !c.id).map((c) => c.email);
+      d.recipients = edit ? all.filter((c) => !c.id).map((c) => ({ email: c.email, name: c.name })) : all.filter((c) => !c.id).map((c) => c.email);
       const total = all.length;
       withBtn($('.btn', e.target), async () => {
+        const base = me.role === 'ADMIN' ? '/api/admin/campaigns' : '/api/campaigns';
+        if (edit) {
+          const r = await api(base + '/' + edit.campaign.id, 'PUT', d);
+          toast(`Saved. ${r.added} added, ${r.removed} removed.`, 'good');
+          close();
+          if (onDone) onDone();
+          return;
+        }
         const when = d.repeat ? 'This campaign repeats automatically. Cancel it on the Campaigns page to stop.' : d.date ? 'It will be sent at the scheduled time.' : 'It will start sending right away.';
         if (!(await confirmBox('Send to ' + total + ' recipient' + (total > 1 ? 's' : '') + '?', when, 'Send'))) return;
-        const r = await api(me.role === 'ADMIN' ? '/api/admin/campaigns' : '/api/campaigns', 'POST', d);
+        const r = await api(base, 'POST', d);
         toast(`Campaign created for ${r.recipients} recipient${r.recipients > 1 ? 's' : ''}`, 'good');
         close();
         if (onDone) onDone();
@@ -1287,7 +1329,7 @@ async function pageCampaigns() {
       ${c.repeat_type ? `<div class="small">🔁 ${esc(scheduleRuleLabel({ schedule_type: c.repeat_type, recurrence_rule: c.repeat_rule, send_time: c.repeat_time }))}</div>` : ''}
       <div class="bar"><i style="width:${pct}%"></i></div>
       <div class="small">Total ${c.total || 0} · Sent ${c.sent || 0} · Failed ${c.failed || 0} · Pending ${c.pending || 0}</div>
-      <button class="btn ghost danger smallbtn" style="margin-top:8px;align-self:flex-start" data-del="${c.id}">${live(c) ? 'Cancel &amp; delete' : 'Delete'}</button>
+      <div class="row" style="margin-top:8px">${live(c) ? `<button class="btn ghost smallbtn" data-edit="${c.id}">Edit / add recipients</button>` : ''}<button class="btn ghost danger smallbtn" data-del="${c.id}">${live(c) ? 'Cancel &amp; delete' : 'Delete'}</button></div>
     </div>`;
   }).join('') : '<div class="card muted">No campaigns yet.</div>'}</div>`;
   const run = async (fn, msg) => { try { const r = await fn(); toast(msg(r), 'good'); pageCampaigns(); } catch (e) { toast(e.message, 'err'); } };
@@ -1297,6 +1339,10 @@ async function pageCampaigns() {
   if (ca) ca.onclick = async () => { if (await confirmBox('Cancel all campaigns', `Stop and remove all ${nAct} running or scheduled campaigns? Unsent emails will not be sent and repeats stop.`, 'Cancel all')) run(() => api(base + '/cancel-all', 'POST', {}), (r) => `Removed ${r.removed}`); };
   const cf = $('#clearfin');
   if (cf) cf.onclick = async () => { if (await confirmBox('Clear finished', 'Remove all completed and cancelled campaigns?', 'Clear')) run(() => api(base, 'DELETE'), (r) => `Cleared ${r.removed}`); };
+  $$('[data-edit]').forEach((b) => b.onclick = () => withBtn(b, async () => {
+    const d = await api(base + '/' + b.dataset.edit);
+    await campaignForm({ edit: d, onDone: pageCampaigns });
+  }));
   $$('[data-del]').forEach((b) => b.onclick = async () => {
     if (!(await confirmBox('Delete campaign', 'Remove this campaign? If it is still running, unsent emails will not be sent.', 'Delete'))) return;
     run(() => api(base + '/' + b.dataset.del, 'DELETE'), () => 'Deleted');
