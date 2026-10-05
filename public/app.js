@@ -177,14 +177,18 @@ function renderAuth() {
     <div class="authtop">
       <div class="logo">${LOGO}</div>
       <h1>Email Scheduler</h1>
-      <p class="tagline">Your personal email reminder &amp; greeting assistant</p>
+      <p class="tagline">Reminders, greetings &amp; Sri Lanka calendar — in one app</p>
       <div class="auth-features">
         <div class="af"><span class="af-ic">✉️</span><div><strong>Send now</strong><small>Email anyone in seconds</small></div></div>
-        <div class="af"><span class="af-ic">⏰</span><div><strong>Schedule</strong><small>One-time, daily, weekly, monthly</small></div></div>
-        <div class="af"><span class="af-ic">🎂</span><div><strong>Greetings</strong><small>Birthdays &amp; anniversaries</small></div></div>
-        <div class="af"><span class="af-ic">📱</span><div><strong>Install app</strong><small>Works on phone &amp; PC (PWA)</small></div></div>
+        <div class="af"><span class="af-ic">⏰</span><div><strong>Schedule</strong><small>One-time, daily, weekly, monthly, yearly</small></div></div>
+        <div class="af"><span class="af-ic">📅</span><div><strong>Calendar</strong><small>Sri Lankan holidays — tap a day to remind</small></div></div>
+        <div class="af"><span class="af-ic">🎂</span><div><strong>Greetings</strong><small>Birthdays &amp; anniversaries auto-sent</small></div></div>
+        <div class="af"><span class="af-ic">👥</span><div><strong>Contacts &amp; campaigns</strong><small>Import lists, email many at once</small></div></div>
+        <div class="af"><span class="af-ic">📝</span><div><strong>Templates</strong><small>Reusable messages with {name}</small></div></div>
+        <div class="af"><span class="af-ic">📱</span><div><strong>Install app</strong><small>Phone &amp; PC as a PWA</small></div></div>
+        <div class="af"><span class="af-ic">🇱🇰</span><div><strong>Colombo time</strong><small>All schedules use UTC+5:30</small></div></div>
       </div>
-      <p class="auth-howto">Sign in to manage contacts, templates, and reminders. All times use <strong>Sri Lanka (UTC+5:30)</strong>. After login, use <em>Add to Home Screen</em> (mobile) or the install icon in your browser (PC) for a full app experience.</p>
+      <p class="auth-howto">Sign in to manage contacts, templates, campaigns, and the <strong>Sri Lanka holiday calendar</strong> (public, bank, mercantile &amp; Poya). Schedule email reminders on any day. After login, use <em>Add to Home Screen</em> (mobile) or the install icon in your browser (PC) for a full app experience.</p>
     </div>
     <div class="authcard"><div id="authbody"></div></div>
   </div>`;
