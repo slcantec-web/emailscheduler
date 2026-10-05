@@ -10,6 +10,7 @@ const fmtDT = (e) => (e ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium'
 const fmtMD = (s) => (s ? `${+s.slice(3)} ${MONTHS[+s.slice(0, 2) - 1]}` : '');
 const slDate = (offsetDays = 0) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Colombo' }).format(new Date(Date.now() + offsetDays * 864e5));
 const ICON = {
+  trash: 'M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14zM10 11v6M14 11v6',
   home: 'M3 11l9-8 9 8v9a2 2 0 0 1-2 2h-4v-6H9v6H5a2 2 0 0 1-2-2z',
   send: 'M22 2L11 13M22 2l-7 20-4-9-9-4z',
   clock: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2',
@@ -102,11 +103,20 @@ const TYPE_LABEL = {
   ANNIVERSARY: 'Anniversary',
 };
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function daysLabel(r) {
+  const s = String(r || 'daily');
+  if (s === 'daily' || s === '0,1,2,3,4,5,6') return 'Every day';
+  if (s === '1,2,3,4,5') return 'Weekdays (Mon–Fri)';
+  if (s === '0,6') return 'Weekends (Sat, Sun)';
+  const a = s.split(',');
+  if (a.length === 1) return `Every ${WEEKDAYS[Number(a[0])] || a[0]}`;
+  return a.map((n) => DAY_SHORT[Number(n)] || n).join(', ');
+}
 function scheduleRuleLabel(s) {
   const t = s.schedule_type, r = s.recurrence_rule, tm = s.send_time || '';
   if (t === 'ONE_TIME') return 'Once';
-  if (t === 'DAILY') return `Every day at ${tm}`;
-  if (t === 'WEEKLY') return `Every ${WEEKDAYS[Number(r)] || r} at ${tm}`;
+  if (t === 'DAILY' || t === 'WEEKLY') return `${daysLabel(r)} at ${tm}`;
   if (t === 'MONTHLY') return r === 'L' ? `Last day of each month at ${tm}` : r === '1' ? `First day of each month at ${tm}` : `Day ${r} each month at ${tm}`;
   if (t === 'YEARLY' || t === 'BIRTHDAY' || t === 'ANNIVERSARY') return `${r || ''} each year at ${tm}`.trim();
   return tm ? `at ${tm}` : '';
@@ -115,6 +125,14 @@ const loading = () => '<div class="splash" style="min-height:40dvh"><div class="
 
 /* ---------- repeat options (shared by Send email, Campaigns) ---------- */
 const monthDayOpts = () => `<option value="1">First day of month (1st)</option><option value="L">Last day of month (month end)</option>${Array.from({ length: 30 }, (_, i) => `<option value="${i + 2}">Day ${i + 2}</option>`).join('')}`;
+const daysPickerHtml = (on) => `<div class="daybtns">${[1, 2, 3, 4, 5, 6, 0].map((i) => `<label class="daychip"><input type="checkbox" name="days" value="${i}"${on.includes(i) ? ' checked' : ''}><span>${DAY_SHORT[i]}</span></label>`).join('')}</div>
+  <div class="row small"><button type="button" class="linkbtn" data-days="1,2,3,4,5,6,0">Every day</button><button type="button" class="linkbtn" data-days="1,2,3,4,5">Weekdays only</button><button type="button" class="linkbtn" data-days="6,0">Weekends only</button></div>`;
+function bindDays(root) {
+  $$('[data-days]', root).forEach((b) => b.onclick = () => {
+    const s = b.dataset.days.split(',');
+    $$('input[name="days"]', root).forEach((x) => { x.checked = s.includes(x.value); });
+  });
+}
 const repeatSelectHtml = () => `<label>Repeat</label>
   <select name="repeat" id="rep">
     <option value="">Don't repeat</option>
@@ -131,19 +149,20 @@ function bindRepeat(root, onceHtml = '', onChange) {
   const paint = () => {
     const t = sel.value;
     if (!t) box.innerHTML = onceHtml;
-    else if (t === 'DAILY') box.innerHTML = `${timeHtml}<p class="hint">Sends every day at this time.</p>`;
-    else if (t === 'WEEKLY') box.innerHTML = `<label>Day of week</label><select name="weekday">${WEEKDAYS.map((n, i) => `<option value="${i}"${i === 1 ? ' selected' : ''}>Every ${n}</option>`).join('')}</select>${timeHtml}`;
+    else if (t === 'DAILY') box.innerHTML = `<label>Send on</label>${daysPickerHtml([0, 1, 2, 3, 4, 5, 6])}${timeHtml}<p class="hint">Untick the days you want to skip, e.g. weekends.</p>`;
+    else if (t === 'WEEKLY') box.innerHTML = `<label>Days of week</label>${daysPickerHtml([1])}${timeHtml}<p class="hint">Pick one or more days.</p>`;
     else if (t === 'MONTHLY') box.innerHTML = `<label>Day of month</label><select name="day_of_month">${monthDayOpts()}</select>${timeHtml}<p class="hint">Month end always means the last day (28, 29, 30 or 31).</p>`;
     else box.innerHTML = `<label>Date each year</label><input name="date" type="date" value="${slDate(0)}" required>${timeHtml}<p class="hint">Only month and day are used.</p>`;
+    bindDays(box);
     if (onChange) onChange(t);
   };
   sel.onchange = paint;
   paint();
   return { paint };
 }
-function repeatPayload(d) {
+function repeatPayload(d, form) {
   if (!d.repeat) return d;
-  if (d.weekday != null) d.weekday = Number(d.weekday);
+  if (form && ['DAILY', 'WEEKLY'].includes(d.repeat)) d.days = $$('input[name="days"]:checked', form).map((x) => Number(x.value));
   if (d.day_of_month != null && d.day_of_month !== 'L') d.day_of_month = Number(d.day_of_month);
   if (d.repeat === 'YEARLY' && d.date && d.date.length === 10) d.date = d.date.slice(5);
   return d;
@@ -497,11 +516,11 @@ async function pageSend() {
     const d = fd(e.target);
     withBtn($('#sendbtn', e.target), async () => {
       if (d.repeat) {
-        repeatPayload(d);
+        repeatPayload(d, e.target);
         await api('/api/schedules', 'POST', {
           schedule_type: d.repeat, recipient: d.recipient, recipient_name: d.recipient_name,
           subject: d.subject, message: d.message, sender_name: d.sender_name,
-          time: d.time, weekday: d.weekday, day_of_month: d.day_of_month, date: d.date,
+          time: d.time, days: d.days, day_of_month: d.day_of_month, date: d.date,
         });
         toast('Repeat schedule created! See it under Schedules.', 'good');
       } else {
@@ -518,9 +537,13 @@ async function pageSend() {
 async function pageSchedules() {
   const data = await api('/api/schedules');
   const list = data.schedules || [];
+  const nAct = list.filter((s) => ['PENDING', 'ACTIVE'].includes(s.status)).length;
+  const nDone = list.filter((s) => ['SENT', 'FAILED', 'CANCELLED'].includes(s.status)).length;
   $('#main').innerHTML = `
   <div class="page-head"><h2>Schedules</h2><button class="btn right" id="add">+ New</button></div>
-  <p class="muted small">${list.filter((s) => ['PENDING', 'ACTIVE'].includes(s.status)).length}${data.limit == null ? ' active (unlimited)' : ` / ${data.limit} active`}</p>
+  <div class="row small" style="margin-bottom:10px"><span class="muted">${nAct}${data.limit == null ? ' active (unlimited)' : ` / ${data.limit} active`}</span>
+    ${nAct ? '<button class="btn ghost danger smallbtn right" id="cancelall">Cancel all</button>' : ''}
+    ${nDone ? `<button class="btn ghost smallbtn${nAct ? '' : ' right'}" id="clearfin">Clear finished (${nDone})</button>` : ''}</div>
   <div id="slist">${list.length ? list.map((s) => `
     <div class="card item">
       <div class="row"><strong>${esc(TYPE_LABEL[s.schedule_type] || s.schedule_type)}</strong> ${statusBadge(s.status)}</div>
@@ -528,12 +551,17 @@ async function pageSchedules() {
       <div class="small" style="margin-top:4px"><strong>${esc(s.subject_template || 'Reminder')}</strong></div>
       <div class="muted small">${esc((s.message_template || '').slice(0, 80))}${(s.message_template || '').length > 80 ? '…' : ''}</div>
       <div class="muted small" style="margin-top:6px">${scheduleRuleLabel(s)} · Next: ${fmtDT(s.next_run_at)}</div>
-      ${['PENDING', 'ACTIVE'].includes(s.status) ? `<div class="actions"><button class="btn ghost danger smallbtn" data-cancel="${s.id}">Cancel</button></div>` : ''}
+      ${s.status !== 'PROCESSING' ? `<div class="actions"><button class="btn ghost danger smallbtn" data-del="${s.id}">Delete</button></div>` : ''}
     </div>`).join('') : '<div class="card muted">No schedules yet.</div>'}</div>`;
   $('#add').onclick = () => scheduleForm();
-  $$('[data-cancel]').forEach((b) => b.onclick = async () => {
-    if (!(await confirmBox('Cancel schedule', 'This schedule will be cancelled.', 'Cancel it'))) return;
-    try { await api('/api/schedules/' + b.dataset.cancel, 'DELETE'); toast('Cancelled', 'good'); pageSchedules(); } catch (e) { toast(e.message, 'err'); }
+  const run = async (fn, msg) => { try { const r = await fn(); toast(msg(r), 'good'); pageSchedules(); } catch (e) { toast(e.message, 'err'); } };
+  const ca = $('#cancelall');
+  if (ca) ca.onclick = async () => { if (await confirmBox('Cancel all schedules', `Remove all ${nAct} active schedules? Nothing more will be sent.`, 'Cancel all')) run(() => api('/api/schedules/cancel-all', 'POST', {}), (r) => `Removed ${r.removed}`); };
+  const cf = $('#clearfin');
+  if (cf) cf.onclick = async () => { if (await confirmBox('Clear finished', 'Remove all sent, failed and cancelled schedules?', 'Clear')) run(() => api('/api/schedules', 'DELETE'), (r) => `Cleared ${r.removed}`); };
+  $$('[data-del]').forEach((b) => b.onclick = async () => {
+    if (!(await confirmBox('Delete schedule', 'This schedule will be removed.', 'Delete'))) return;
+    run(() => api('/api/schedules/' + b.dataset.del, 'DELETE'), () => 'Deleted');
   });
 }
 function scheduleForm() {
@@ -570,11 +598,9 @@ function scheduleForm() {
         when.innerHTML = `<label>Date</label><input name="date" type="date" value="${slDate(1)}" required>
           <p class="hint">Sends once on this date at the time below.</p>`;
       } else if (t === 'DAILY') {
-        when.innerHTML = `<p class="hint">Sends every day at the time below.</p><input type="hidden" name="date" value="">`;
+        when.innerHTML = `<label>Send on</label>${daysPickerHtml([0, 1, 2, 3, 4, 5, 6])}<p class="hint">Untick the days you want to skip, e.g. weekends.</p>`;
       } else if (t === 'WEEKLY') {
-        when.innerHTML = `<label>Day of week</label>
-          <select name="weekday">${WEEKDAYS.map((n, i) => `<option value="${i}">${n}</option>`).join('')}</select>
-          <p class="hint">Sends every week on this day.</p>`;
+        when.innerHTML = `<label>Days of week</label>${daysPickerHtml([1])}<p class="hint">Pick one or more days.</p>`;
       } else if (t === 'MONTHLY') {
         when.innerHTML = `<label>Day of month</label>
           <select name="day_of_month">${monthDayOpts()}</select>
@@ -583,6 +609,7 @@ function scheduleForm() {
         when.innerHTML = `<label>Date each year</label><input name="date" type="date" value="${slDate(0)}" required>
           <p class="hint">Only month & day are used — repeats every year.</p>`;
       }
+      bindDays(when);
     };
     $('#stype', sheet).onchange = renderWhen;
     renderWhen();
@@ -592,7 +619,7 @@ function scheduleForm() {
       if (['YEARLY', 'BIRTHDAY', 'ANNIVERSARY'].includes(d.schedule_type) && d.date && d.date.length === 10) {
         d.date = d.date.slice(5); // YYYY-MM-DD → MM-DD
       }
-      if (d.weekday != null) d.weekday = Number(d.weekday);
+      if (['DAILY', 'WEEKLY'].includes(d.schedule_type)) d.days = $$('input[name="days"]:checked', e.target).map((x) => Number(x.value));
       if (d.day_of_month != null && d.day_of_month !== 'L') d.day_of_month = Number(d.day_of_month);
       withBtn($('.btn', e.target), async () => {
         await api('/api/schedules', 'POST', d);
@@ -920,7 +947,7 @@ async function campaignForm({ contacts = [], onDone } = {}) {
       if (!chips.flush()) { toast('One of the emails is not valid. Fix or clear it first.', 'err'); return; }
       const all = [...chips.items.values()];
       if (!all.length) { toast('Add at least one recipient.', 'err'); return; }
-      const d = repeatPayload(fd(e.target));
+      const d = repeatPayload(fd(e.target), e.target);
       d.contact_ids = all.filter((c) => c.id).map((c) => c.id);
       d.recipients = all.filter((c) => !c.id).map((c) => c.email);
       const total = all.length;
@@ -951,6 +978,7 @@ async function pageContacts() {
   <div id="clist"></div>
   <div class="selbar hide" id="selbar"><span id="selcount"></span>
     <button type="button" class="btn ghost smallbtn" id="selclear">Clear</button>
+    <button type="button" class="btn ghost danger smallbtn" id="seldel">${ic('trash')} Delete</button>
     <button type="button" class="btn smallbtn" id="selsend">${ic('send')} Email</button></div>`;
   const shown = () => all.filter((c) => cMatch(c, q));
   const bar = () => {
@@ -960,27 +988,37 @@ async function pageContacts() {
   const paint = () => {
     const list = shown();
     $('#ccount').textContent = q ? `${list.length} of ${all.length} shown` : `${all.length} saved`;
-    $('#cinfo').textContent = all.length ? (q ? `${list.length} match${list.length === 1 ? '' : 'es'}` : 'Tick contacts to email them together') : '';
+    $('#cinfo').textContent = all.length ? (q ? `${list.length} match${list.length === 1 ? '' : 'es'}` : 'Tick contacts to email or delete them together') : '';
     $('#selall').classList.toggle('hide', !list.length);
     $('#clist').innerHTML = list.length ? list.map((c) => `
-      <div class="card item contact crow${sel.has(c.id) ? ' on' : ''}" data-id="${c.id}">
-        <label class="contact-main">
+      <div class="crow cr${sel.has(c.id) ? ' on' : ''}" data-id="${c.id}">
+        <label class="cr-main">
           <input type="checkbox" ${sel.has(c.id) ? 'checked' : ''} aria-label="Select ${esc(c.name)}">
-          <span class="avatar-sm">${esc(initialsOf(c.name))}</span>
-          <div class="contact-info">
-            <strong>${esc(c.name)}</strong>
-            <span class="muted small ellip">${esc(c.email)}</span>
-            ${c.birthday || c.anniversary ? `<div class="contact-tags">${c.birthday ? `<span class="tag">🎂 ${esc(fmtMD(c.birthday))}</span>` : ''}${c.anniversary ? `<span class="tag">💍 ${esc(fmtMD(c.anniversary))}</span>` : ''}</div>` : ''}
-          </div>
+          <span class="avatar-xs">${esc(initialsOf(c.name))}</span>
+          <span class="cr-info"><strong>${esc(c.name)}</strong><small>${esc(c.email)}${c.birthday ? ` · 🎂 ${esc(fmtMD(c.birthday))}` : ''}${c.anniversary ? ` · 💍 ${esc(fmtMD(c.anniversary))}` : ''}</small></span>
         </label>
-        <div class="actions"><button type="button" class="btn smallbtn" data-send="${c.id}">Send email</button><button type="button" class="btn ghost danger smallbtn" data-del="${c.id}">Delete</button></div>
+        <button type="button" class="iconbtn" data-send="${c.id}" title="Send email" aria-label="Send email">${ic('send')}</button>
+        <button type="button" class="iconbtn danger" data-del="${c.id}" title="Delete" aria-label="Delete">${ic('trash')}</button>
       </div>`).join('') : `<div class="card muted">${all.length ? 'No contacts match your search.' : 'No contacts yet. Tap + Add to save one.'}</div>`;
     bar();
   };
   paint();
+  const removeIds = async (ids) => {
+    const r = await api('/api/contacts/delete', 'POST', { ids });
+    const gone = new Set(ids);
+    all = all.filter((c) => !gone.has(c.id));
+    contactsCache = all;
+    ids.forEach((i) => sel.delete(i));
+    toast(`Deleted ${r.removed}`, 'good');
+    paint();
+  };
   $('#cq').oninput = (e) => { q = e.target.value.trim(); paint(); };
   $('#selall').onclick = () => { shown().forEach((c) => sel.add(c.id)); paint(); };
   $('#selclear').onclick = () => { sel.clear(); paint(); };
+  $('#seldel').onclick = async () => {
+    if (!(await confirmBox('Delete contacts', `Delete ${sel.size} selected contact${sel.size > 1 ? 's' : ''}? This cannot be undone.`, 'Delete'))) return;
+    try { await removeIds([...sel]); } catch (e) { toast(e.message, 'err'); }
+  };
   $('#selsend').onclick = () => campaignForm({
     contacts: all.filter((c) => sel.has(c.id)),
     onDone: () => { sel.clear(); go('campaigns', { push: true }); },
@@ -1003,15 +1041,7 @@ async function pageContacts() {
     const b = e.target.closest('[data-del]');
     if (!b) return;
     if (!(await confirmBox('Delete contact', 'Remove this contact?', 'Delete'))) return;
-    try {
-      await api('/api/contacts/' + b.dataset.del, 'DELETE');
-      const id = Number(b.dataset.del);
-      all = all.filter((c) => c.id !== id);
-      contactsCache = all;
-      sel.delete(id);
-      toast('Deleted', 'good');
-      paint();
-    } catch (err) { toast(err.message, 'err'); }
+    try { await removeIds([Number(b.dataset.del)]); } catch (err) { toast(err.message, 'err'); }
   });
   $('#add').onclick = () => contactForm();
   $('#imp').onclick = () => importForm();
@@ -1042,13 +1072,18 @@ async function pageHistory() {
   const data = await api('/api/email/history');
   const list = data.logs || [];
   $('#main').innerHTML = `
-  <div class="page-head"><h2>Email history</h2></div>
+  <div class="page-head"><h2>Email history</h2>${list.length ? '<button class="btn ghost danger smallbtn" id="clearh">Clear history</button>' : ''}</div>
   <div class="list">${list.length ? list.map((l) => `
     <div class="card item">
       <div class="row"><strong>${esc(l.subject_preview || '(no subject)')}</strong> ${statusBadge(l.status)}</div>
       <div class="muted small">To: ${esc(l.recipient_email)} · ${esc(l.message_type)} · ${fmtDT(l.created_at)}</div>
       ${l.error_message ? `<div class="small" style="color:var(--bad)">${esc(l.error_message)}</div>` : ''}
     </div>`).join('') : '<div class="card muted">No emails yet.</div>'}</div>`;
+  const ch = $('#clearh');
+  if (ch) ch.onclick = async () => {
+    if (!(await confirmBox('Clear history', 'Remove all entries from your email history? Your daily/monthly sending limits are not reset.', 'Clear'))) return;
+    try { await api('/api/email/history', 'DELETE'); toast('History cleared', 'good'); pageHistory(); } catch (e) { toast(e.message, 'err'); }
+  };
 }
 
 async function pageTemplates() {
@@ -1232,11 +1267,16 @@ async function pageCampaigns() {
   const base = isAdmin ? '/api/admin/campaigns' : '/api/campaigns';
   const data = await api(base);
   const list = data.campaigns || [];
+  const live = (c) => ['SCHEDULED', 'RUNNING'].includes(c.status);
+  const nAct = list.filter(live).length, nDone = list.length - nAct;
   $('#main').innerHTML = `
   <div class="page-head"><h2>Campaigns</h2>
   <div class="head-actions"><button class="btn ghost smallbtn" id="refresh">Refresh</button>
   <button class="btn smallbtn" id="add">+ New</button></div></div>
   <p class="muted small" style="margin-bottom:12px">Email many people at once. Up to ${data.max_recipients} recipients per campaign, sent in batches every minute. Tip: tick contacts on the Contacts tab and tap Email.</p>
+  ${nAct || nDone ? `<div class="row small" style="margin-bottom:10px">
+    ${nAct ? '<button class="btn ghost danger smallbtn" id="cancelall">Cancel all</button>' : ''}
+    ${nDone ? `<button class="btn ghost smallbtn" id="clearfin">Clear finished (${nDone})</button>` : ''}</div>` : ''}
   <div class="list">${list.length ? list.map((c) => {
     const done = (c.sent || 0) + (c.failed || 0);
     const pct = c.total ? Math.round((done / c.total) * 100) : 0;
@@ -1247,14 +1287,19 @@ async function pageCampaigns() {
       ${c.repeat_type ? `<div class="small">🔁 ${esc(scheduleRuleLabel({ schedule_type: c.repeat_type, recurrence_rule: c.repeat_rule, send_time: c.repeat_time }))}</div>` : ''}
       <div class="bar"><i style="width:${pct}%"></i></div>
       <div class="small">Total ${c.total || 0} · Sent ${c.sent || 0} · Failed ${c.failed || 0} · Pending ${c.pending || 0}</div>
-      ${['SCHEDULED', 'RUNNING'].includes(c.status) ? `<button class="btn ghost danger smallbtn" style="margin-top:8px;align-self:flex-start" data-cancel="${c.id}">Cancel</button>` : ''}
+      <button class="btn ghost danger smallbtn" style="margin-top:8px;align-self:flex-start" data-del="${c.id}">${live(c) ? 'Cancel &amp; delete' : 'Delete'}</button>
     </div>`;
   }).join('') : '<div class="card muted">No campaigns yet.</div>'}</div>`;
+  const run = async (fn, msg) => { try { const r = await fn(); toast(msg(r), 'good'); pageCampaigns(); } catch (e) { toast(e.message, 'err'); } };
   $('#refresh').onclick = () => pageCampaigns().catch((e) => toast(e.message, 'err'));
   $('#add').onclick = () => campaignForm({ onDone: pageCampaigns });
-  $$('[data-cancel]').forEach((b) => b.onclick = async () => {
-    if (!(await confirmBox('Cancel campaign', 'Stop this campaign? Emails not yet sent will not be sent, and it will not repeat.', 'Cancel it'))) return;
-    try { await api(base + '/' + b.dataset.cancel + '/cancel', 'POST', {}); toast('Cancelled', 'good'); pageCampaigns(); } catch (e) { toast(e.message, 'err'); }
+  const ca = $('#cancelall');
+  if (ca) ca.onclick = async () => { if (await confirmBox('Cancel all campaigns', `Stop and remove all ${nAct} running or scheduled campaigns? Unsent emails will not be sent and repeats stop.`, 'Cancel all')) run(() => api(base + '/cancel-all', 'POST', {}), (r) => `Removed ${r.removed}`); };
+  const cf = $('#clearfin');
+  if (cf) cf.onclick = async () => { if (await confirmBox('Clear finished', 'Remove all completed and cancelled campaigns?', 'Clear')) run(() => api(base, 'DELETE'), (r) => `Cleared ${r.removed}`); };
+  $$('[data-del]').forEach((b) => b.onclick = async () => {
+    if (!(await confirmBox('Delete campaign', 'Remove this campaign? If it is still running, unsent emails will not be sent.', 'Delete'))) return;
+    run(() => api(base + '/' + b.dataset.del, 'DELETE'), () => 'Deleted');
   });
 }
 

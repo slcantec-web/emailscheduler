@@ -50,6 +50,8 @@ Keep the folder structure exactly as above (`public/`, `functions/`, `worker/` a
 2. Open the database → **Console** tab.
 3. Paste the full contents of `schema.sql` and run it.  
    - If the console rejects the multi-statement paste, run it in pieces (each `CREATE TABLE` / `CREATE INDEX`, then the final `INSERT`).
+   - **Updating an existing database?** Run this once in the Console instead (adds the history-clear column):
+     `ALTER TABLE email_logs ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;`
 4. Check the **Tables** tab: you should see 12 tables, and `system_settings` should have 12 rows.
 
 ## Step 3: Create the Pages project
@@ -134,5 +136,8 @@ Set `DEV_MODE` = `1` on the Pages project: OTPs are written to the function logs
 - Message templates with `{name}`, `{sender}`, `{year}`, `{email}`
 - Configurable per-user limits (admin)
 - Contact search, multi-select and bulk email (campaigns) for every user; type-ahead and a contact picker on email fields
-- Audit-friendly email history
+- Audit-friendly email history, with Clear history
+- Delete / Cancel all / Clear finished for schedules and campaigns
+- Repeat on chosen days of the week (e.g. weekdays only)
+- Compact contact list with bulk delete
 - PWA-ready frontend

@@ -94,29 +94,25 @@ function nextYearly(mmdd, hhmm, after) {
   }
   return null;
 }
-/** Next daily run after `after` at hh:mm Colombo */
-function nextDaily(hhmm, after) {
-  for (let i = 0; i < 3; i++) {
-    const parts = colomboParts(after + i * 86400);
-    const e = toEpoch(`${parts.y}-${String(parts.m).padStart(2, '0')}-${String(parts.d).padStart(2, '0')}`, hhmm);
-    if (e && e > after) return e;
-  }
-  return null;
-}
-/** weekday: 0=Sun … 6=Sat (Colombo) */
-function nextWeekly(weekday, hhmm, after) {
-  const wd = Number(weekday);
+const ALL_DAYS = '0,1,2,3,4,5,6';
+/** weekdays: "1,2,3" (0=Sun … 6=Sat, Colombo time) or a single digit */
+function nextWeekly(weekdays, hhmm, after) {
+  const set = new Set(String(weekdays).split(',').map(Number));
   for (let i = 0; i < 14; i++) {
     const parts = colomboParts(after + i * 86400);
     const dateStr = `${parts.y}-${String(parts.m).padStart(2, '0')}-${String(parts.d).padStart(2, '0')}`;
     const noon = toEpoch(dateStr, '12:00');
     if (noon == null) continue;
-    const jsDay = new Date((noon + TZ_OFFSET) * 1000).getUTCDay(); // 0=Sun
-    if (jsDay !== wd) continue;
+    const jsDay = new Date((noon + TZ_OFFSET) * 1000).getUTCDay();
+    if (!set.has(jsDay)) continue;
     const e = toEpoch(dateStr, hhmm);
     if (e && e > after) return e;
   }
   return null;
+}
+/** rule = 'daily' (every day) or a day list like "1,2,3,4,5" */
+function nextDaily(hhmm, after, rule) {
+  return nextWeekly(rule && rule !== 'daily' ? rule : ALL_DAYS, hhmm, after);
 }
 /** dayOfMonth 1–31 or 'L' (last day); clamps to last day of month */
 function nextMonthly(dayOfMonth, hhmm, after) {
@@ -133,7 +129,7 @@ function nextMonthly(dayOfMonth, hhmm, after) {
   return null;
 }
 function computeNextRun(type, rule, hhmm, after) {
-  if (type === 'DAILY') return nextDaily(hhmm, after);
+  if (type === 'DAILY') return nextDaily(hhmm, after, rule);
   if (type === 'WEEKLY') return nextWeekly(rule, hhmm, after);
   if (type === 'MONTHLY') return nextMonthly(rule, hhmm, after);
   if (type === 'YEARLY' || type === 'BIRTHDAY' || type === 'ANNIVERSARY') return nextYearly(rule, hhmm, after);
@@ -146,18 +142,35 @@ function toMMDD(v) {
   const m = s.match(/^(?:\d{4}-)?(\d{2}-\d{2})$/);
   return m && validMMDD(m[1]) ? m[1] : false;
 }
+function parseDays(b) {
+  let v = b.days;
+  if (v == null) return null;
+  if (typeof v === 'string') v = v.split(/[\s,]+/).filter(Boolean);
+  if (!Array.isArray(v)) return null;
+  const set = new Set(v.map(Number));
+  for (const d of set) if (!Number.isInteger(d) || d < 0 || d > 6) throw new ApiError('INVALID_DATE', 'Invalid day selection.');
+  return [...set].sort((a, b) => a - b);
+}
 /** Shared repeat parser (schedules + campaigns). Returns { type, rule, next } */
 function parseRepeat(type, b, time, after) {
   let rule, next;
   if (type === 'DAILY') {
-    rule = 'daily'; next = nextDaily(time, after);
+    const days = parseDays(b);
+    if (days && !days.length) throw new ApiError('INVALID_DATE', 'Choose at least one day.');
+    rule = !days || days.length === 7 ? 'daily' : days.join(',');
+    next = nextDaily(time, after, rule);
   } else if (type === 'WEEKLY') {
-    const map = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
-    let wd = b.weekday != null ? b.weekday : b.date;
-    if (typeof wd === 'string' && map[wd.toLowerCase().slice(0, 3)] != null) wd = map[wd.toLowerCase().slice(0, 3)];
-    wd = Number(wd);
-    if (!Number.isInteger(wd) || wd < 0 || wd > 6) throw new ApiError('INVALID_DATE', 'Choose a weekday.');
-    rule = String(wd); next = nextWeekly(wd, time, after);
+    let days = parseDays(b);
+    if (!days) {
+      const map = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+      let wd = b.weekday != null ? b.weekday : b.date;
+      if (typeof wd === 'string' && map[wd.toLowerCase().slice(0, 3)] != null) wd = map[wd.toLowerCase().slice(0, 3)];
+      wd = Number(wd);
+      days = Number.isInteger(wd) && wd >= 0 && wd <= 6 ? [wd] : [];
+    }
+    if (!days.length) throw new ApiError('INVALID_DATE', 'Choose at least one day of the week.');
+    rule = days.join(',');
+    next = nextWeekly(rule, time, after);
   } else if (type === 'MONTHLY') {
     const raw = b.day_of_month != null ? b.day_of_month : (clean(b.date, 10).match(/(\d{1,2})$/) || [])[1];
     if (String(raw).toUpperCase() === 'L') rule = 'L';
@@ -365,20 +378,9 @@ async function buildSchedule(env, user, settings, b) {
     if (!at) throw new ApiError('INVALID_DATE', 'Enter a valid date.');
     if (at <= t + 30) throw new ApiError('PAST_DATE', 'Schedule time must be in the future (Sri Lanka time).');
     Object.assign(f, { scheduledAt: at, nextRun: at, rule: null, status: 'PENDING' });
-  } else if (type === 'DAILY') {
-    const next = nextDaily(time, t);
-    if (!next) throw new ApiError('INVALID_DATE', 'Could not compute next daily run.');
-    Object.assign(f, { scheduledAt: null, nextRun: next, rule: 'daily', status: 'ACTIVE' });
-  } else if (type === 'WEEKLY') {
-    // weekday: 0=Sun … 6=Sat, or accept Mon/Tue/…
-    let wd = b.weekday != null ? b.weekday : b.date;
-    const map = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
-    if (typeof wd === 'string' && map[wd.toLowerCase().slice(0, 3)] != null) wd = map[wd.toLowerCase().slice(0, 3)];
-    wd = Number(wd);
-    if (!Number.isInteger(wd) || wd < 0 || wd > 6) throw new ApiError('INVALID_DATE', 'Choose a weekday (0=Sun … 6=Sat).');
-    const next = nextWeekly(wd, time, t);
-    if (!next) throw new ApiError('INVALID_DATE', 'Could not compute next weekly run.');
-    Object.assign(f, { scheduledAt: null, nextRun: next, rule: String(wd), status: 'ACTIVE' });
+  } else if (type === 'DAILY' || type === 'WEEKLY') {
+    const p = parseRepeat(type, b, time, t);
+    Object.assign(f, { scheduledAt: null, nextRun: p.next, rule: p.rule, status: 'ACTIVE' });
   } else if (type === 'MONTHLY') {
     const p = parseRepeat('MONTHLY', b, time, t);
     Object.assign(f, { scheduledAt: null, nextRun: p.next, rule: p.rule, status: 'ACTIVE' });
@@ -565,6 +567,17 @@ route('POST', '/api/contacts/import', 'user', async (c) => {
   for (let i = 0; i < rows.length; i += 90) await c.env.DB.batch(rows.slice(i, i + 90));
   return ok({ imported: rows.length, duplicates, invalid, over_limit: overLimit });
 });
+route('POST', '/api/contacts/delete', 'user', async (c) => {
+  const ids = [...new Set((Array.isArray(c.body.ids) ? c.body.ids : []).map(Number).filter(Number.isInteger))].slice(0, 5000);
+  if (!ids.length) throw new ApiError('NO_CONTACTS', 'Select at least one contact.');
+  let removed = 0;
+  for (let i = 0; i < ids.length; i += 80) {
+    const part = ids.slice(i, i + 80);
+    const r = await c.env.DB.prepare(`DELETE FROM contacts WHERE user_id=? AND id IN (${part.map(() => '?').join(',')})`).bind(c.user.id, ...part).run();
+    removed += r.meta.changes;
+  }
+  return ok({ removed });
+});
 route('PUT', '/api/contacts/:id', 'user', async (c) => {
   const name = clean(c.body.name, 80); if (!name) throw new ApiError('INVALID_NAME', 'Name is required.');
   const email = normalizeEmail(c.body.email); if (!email) throw new ApiError('INVALID_EMAIL', 'Enter a valid email address.');
@@ -628,8 +641,12 @@ route('POST', '/api/email/send', 'user', async (c) => {
 });
 route('GET', '/api/email/history', 'user', async (c) => {
   const off = Math.max(0, Number(c.url.searchParams.get('offset')) || 0);
-  const { results } = await c.env.DB.prepare("SELECT id,recipient_email,message_type,subject_preview,message_preview,provider_message_id,status,error_message,created_at FROM email_logs WHERE user_id=? AND message_type!='OTP' ORDER BY id DESC LIMIT 30 OFFSET ?").bind(c.user.id, off).all();
+  const { results } = await c.env.DB.prepare("SELECT id,recipient_email,message_type,subject_preview,message_preview,provider_message_id,status,error_message,created_at FROM email_logs WHERE user_id=? AND hidden=0 AND message_type!='OTP' ORDER BY id DESC LIMIT 30 OFFSET ?").bind(c.user.id, off).all();
   return ok({ logs: results, next_offset: results.length === 30 ? off + 30 : null });
+});
+route('DELETE', '/api/email/history', 'user', async (c) => {
+  const r = await c.env.DB.prepare("UPDATE email_logs SET hidden=1 WHERE user_id=? AND hidden=0 AND message_type!='OTP'").bind(c.user.id).run();
+  return ok({ removed: r.meta.changes });
 });
 
 // --- schedules
@@ -659,9 +676,19 @@ route('PUT', '/api/schedules/:id', 'user', async (c) => {
   return ok({});
 });
 route('DELETE', '/api/schedules/:id', 'user', async (c) => {
-  const r = await c.env.DB.prepare("UPDATE scheduled_messages SET status='CANCELLED', updated_at=? WHERE id=? AND user_id=? AND status IN ('PENDING','ACTIVE')").bind(now(), Number(c.params.id), c.user.id).run();
-  if (!r.meta.changes) throw new ApiError('NOT_FOUND', 'No cancellable schedule found.', 404);
+  const r = await c.env.DB.prepare("DELETE FROM scheduled_messages WHERE id=? AND user_id=? AND status!='PROCESSING'").bind(Number(c.params.id), c.user.id).run();
+  if (!r.meta.changes) throw new ApiError('NOT_FOUND', 'Schedule not found.', 404);
   return ok({});
+});
+// cancel all = remove every pending/active schedule
+route('POST', '/api/schedules/cancel-all', 'user', async (c) => {
+  const r = await c.env.DB.prepare("DELETE FROM scheduled_messages WHERE user_id=? AND status IN ('PENDING','ACTIVE')").bind(c.user.id).run();
+  return ok({ removed: r.meta.changes });
+});
+// clear finished (sent / failed / cancelled)
+route('DELETE', '/api/schedules', 'user', async (c) => {
+  const r = await c.env.DB.prepare("DELETE FROM scheduled_messages WHERE user_id=? AND status IN ('SENT','FAILED','CANCELLED')").bind(c.user.id).run();
+  return ok({ removed: r.meta.changes });
 });
 
 // --- admin
@@ -808,6 +835,23 @@ async function cancelCampaign(c, all) {
   await c.env.DB.prepare("UPDATE email_campaign_recipients SET status='CANCELLED' WHERE campaign_id=? AND status='PENDING'").bind(id).run();
   await audit(c.env, c.user.id, 'CAMPAIGN_CANCELLED', 'campaign', id);
   return ok({});
+}
+async function removeCampaigns(c, all, statuses, id) {
+  const st = statuses.map((s) => `'${s}'`).join(',');
+  const scope = (all ? '' : ' AND created_by=?') + (id ? ' AND id=?' : '');
+  const binds = [...(all ? [] : [c.user.id]), ...(id ? [id] : [])];
+  await c.env.DB.prepare(`DELETE FROM email_campaign_recipients WHERE campaign_id IN (SELECT id FROM email_campaigns WHERE status IN (${st})${scope})`).bind(...binds).run();
+  const r = await c.env.DB.prepare(`DELETE FROM email_campaigns WHERE status IN (${st})${scope}`).bind(...binds).run();
+  return r.meta.changes;
+}
+const CAMP_ALL = ['SCHEDULED', 'RUNNING', 'COMPLETED', 'CANCELLED'];
+for (const [prefix, auth, all] of [['/api/admin/campaigns', 'admin', true], ['/api/campaigns', 'user', false]]) {
+  route('DELETE', `${prefix}/:id`, auth, async (c) => {
+    if (!(await removeCampaigns(c, all, CAMP_ALL, Number(c.params.id)))) throw new ApiError('NOT_FOUND', 'Campaign not found.', 404);
+    return ok({});
+  });
+  route('POST', `${prefix}/cancel-all`, auth, async (c) => ok({ removed: await removeCampaigns(c, all, ['SCHEDULED', 'RUNNING']) }));
+  route('DELETE', prefix, auth, async (c) => ok({ removed: await removeCampaigns(c, all, ['COMPLETED', 'CANCELLED']) }));
 }
 route('GET', '/api/admin/campaigns', 'admin', (c) => listCampaigns(c, true));
 route('POST', '/api/admin/campaigns', 'admin', (c) => createCampaign(c));

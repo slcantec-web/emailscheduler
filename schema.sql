@@ -127,7 +127,8 @@ CREATE TABLE IF NOT EXISTS email_logs (
   error_code TEXT,
   error_message TEXT,
   sent_at INTEGER,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  hidden INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_logs_user ON email_logs(user_id, created_at);
 
