@@ -94,7 +94,10 @@ CREATE TABLE IF NOT EXISTS email_campaigns (
   status TEXT NOT NULL DEFAULT 'SCHEDULED' CHECK (status IN ('SCHEDULED','RUNNING','COMPLETED','CANCELLED')),
   created_at INTEGER NOT NULL,
   started_at INTEGER,
-  completed_at INTEGER
+  completed_at INTEGER,
+  repeat_type TEXT,
+  repeat_rule TEXT,
+  repeat_time TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_camp_due ON email_campaigns(status, scheduled_at);
 
