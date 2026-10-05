@@ -132,6 +132,7 @@ Set `DEV_MODE` = `1` on the Pages project: OTPs are written to the function logs
 - Send single emails
 - Schedule one-time emails / reminders
 - Birthday & anniversary yearly greetings
+- **Sri Lanka calendar** — public, bank, mercantile & Poya holidays (2025–2027); tap any day to schedule an email reminder (uses your schedule limit)
 - Personal contacts, with import from vCard (.vcf) or CSV
 - Message templates with `{name}`, `{sender}`, `{year}`, `{email}`
 - Configurable per-user limits (admin)
@@ -141,4 +142,4 @@ Set `DEV_MODE` = `1` on the Pages project: OTPs are written to the function logs
 - Edit a scheduled or running campaign (message, schedule, add/remove recipients)
 - Repeat on chosen days of the week (e.g. weekdays only)
 - Compact contact list with bulk delete
-- PWA-ready frontend
+- PWA-ready frontend (responsive mobile + PC)

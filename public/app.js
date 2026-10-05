@@ -25,6 +25,7 @@ const ICON = {
   mega: 'M3 11v2a1 1 0 0 0 1 1h3l8 5V5L7 10H4a1 1 0 0 0-1 1zM19 8a5 5 0 0 1 0 8',
   scroll: 'M8 21h12a2 2 0 0 0 2-2v-2H10v2a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v3h4M19 17V5a2 2 0 0 0-2-2H4',
   back: 'M15 18l-6-6 6-6',
+  calendar: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
 };
 const ic = (n) => `<svg class="icon-svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${ICON[n] || ''}"/></svg>`;
 const LOGO = '<svg viewBox="0 0 24 24" fill="#fff"><path d="M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>';
@@ -33,8 +34,8 @@ let me = null, mySettings = {}, busyNav = 0, contactsCache = null;
 
 /* ---------- navigation state (back button + phone back gesture) ---------- */
 const TOP = ['home', 'send', 'schedules', 'contacts', 'more'];
-const PARENT = { history: 'more', templates: 'more', profile: 'more', admin: 'more', campaigns: 'more', settings: 'more' };
-const TITLES = { home: 'Email Scheduler', send: 'Send email', schedules: 'Schedules', contacts: 'Contacts', more: 'More', history: 'Email history', templates: 'Templates', profile: 'Profile', admin: 'Users', campaigns: 'Campaigns', settings: 'Settings' };
+const PARENT = { history: 'more', templates: 'more', profile: 'more', admin: 'more', campaigns: 'more', settings: 'more', calendar: 'more' };
+const TITLES = { home: 'Email Scheduler', send: 'Send email', schedules: 'Schedules', contacts: 'Contacts', more: 'More', history: 'Email history', templates: 'Templates', profile: 'Profile', admin: 'Users', campaigns: 'Campaigns', settings: 'Settings', calendar: 'Calendar' };
 let curPage = 'home', navDepth = 0, ignorePop = false, sendPrefill = null;
 function updateTopbar() {
   const tb = $('#topbar'); if (!tb) return;
@@ -414,7 +415,7 @@ function shell(title, sub) {
   ];
   const groups = [
     { t: 'Main', items: nav.slice(0, 4) },
-    { t: 'Tools', items: [{ id: 'history', label: 'History', icon: 'list' }, { id: 'templates', label: 'Templates', icon: 'file' }, { id: 'campaigns', label: 'Campaigns', icon: 'mega' }] },
+    { t: 'Tools', items: [{ id: 'calendar', label: 'Calendar', icon: 'calendar' }, { id: 'history', label: 'History', icon: 'list' }, { id: 'templates', label: 'Templates', icon: 'file' }, { id: 'campaigns', label: 'Campaigns', icon: 'mega' }] },
     { t: 'Account', items: [{ id: 'profile', label: 'Profile', icon: 'user' }, { id: 'logout', label: 'Log out', icon: 'logout' }] },
   ];
   if (isAdmin) groups.splice(2, 0, { t: 'Admin', items: [{ id: 'admin', label: 'Users', icon: 'shield' }, { id: 'settings', label: 'Settings', icon: 'settings' }] });
@@ -425,7 +426,7 @@ function shell(title, sub) {
   $('#back').onclick = goBack;
 }
 function setNav(id) {
-  const moreIds = ['history', 'templates', 'profile', 'admin', 'campaigns', 'settings'];
+  const moreIds = ['history', 'templates', 'profile', 'admin', 'campaigns', 'settings', 'calendar'];
   $$('#bnav button, #side a').forEach((el) => el.classList.toggle('on', el.dataset.nav === id || (el.dataset.nav === 'more' && moreIds.includes(id))));
 }
 async function go(id, opts = {}) {
@@ -461,6 +462,7 @@ async function go(id, opts = {}) {
     else if (id === 'admin') await pageAdmin();
     else if (id === 'campaigns') await pageCampaigns();
     else if (id === 'settings') await pageSettings();
+    else if (id === 'calendar') await pageCalendar();
     else main.innerHTML = '<p class="muted">Coming soon</p>';
   } catch (e) { toast(e.message, 'err'); $('#main').innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
   finally { busyNav = 0; }
@@ -486,6 +488,7 @@ async function pageHome() {
     <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:10px">
       <button class="btn" data-go="send">${ic('send')} Send email</button>
       <button class="btn ghost" data-go="schedules">${ic('clock')} Schedules</button>
+      <button class="btn ghost" data-go="calendar">${ic('calendar')} Calendar</button>
       <button class="btn ghost" data-go="contacts">${ic('users')} Contacts</button>
     </div>
   </div>`;
@@ -564,13 +567,16 @@ async function pageSchedules() {
     run(() => api('/api/schedules/' + b.dataset.del, 'DELETE'), () => 'Deleted');
   });
 }
-function scheduleForm() {
-  modal(`<h3>New schedule</h3>
+function scheduleForm(prefill = {}) {
+  const preDate = prefill.date || '';
+  const preSubject = prefill.subject || 'Reminder';
+  const preMsg = prefill.message || '';
+  modal(`<h3>${preDate ? 'Remind me on this day' : 'New schedule'}</h3>
   <form id="sf">
     <div class="cf-grid"><div class="cf-col">
     <label>Repeat</label>
     <select name="schedule_type" id="stype">
-      <option value="ONE_TIME">One-time (specific date)</option>
+      <option value="ONE_TIME" selected>One-time (specific date)</option>
       <option value="DAILY">Every day</option>
       <option value="WEEKLY">Every week</option>
       <option value="MONTHLY">Every month</option>
@@ -585,8 +591,8 @@ function scheduleForm() {
     </div><div class="cf-col">
     <label>Recipient email</label>${recipField()}
     <label>Recipient name</label><input name="recipient_name" maxlength="80">
-    <label>Subject</label><input name="subject" maxlength="200" value="Reminder" required>
-    <label>Message</label><textarea name="message" rows="4" required placeholder="Hi {name}! ..."></textarea>
+    <label>Subject</label><input name="subject" maxlength="200" value="${esc(preSubject)}" required>
+    <label>Message</label><textarea name="message" rows="4" required placeholder="Hi {name}! ...">${esc(preMsg)}</textarea>
     </div></div>
     <button class="btn block">Schedule</button>
   </form>`, (sheet, close) => {
@@ -595,7 +601,7 @@ function scheduleForm() {
     const renderWhen = () => {
       const t = $('#stype', sheet).value;
       if (t === 'ONE_TIME') {
-        when.innerHTML = `<label>Date</label><input name="date" type="date" value="${slDate(1)}" required>
+        when.innerHTML = `<label>Date</label><input name="date" type="date" value="${esc(preDate || slDate(1))}" required>
           <p class="hint">Sends once on this date at the time below.</p>`;
       } else if (t === 'DAILY') {
         when.innerHTML = `<label>Send on</label>${daysPickerHtml([0, 1, 2, 3, 4, 5, 6])}<p class="hint">Untick the days you want to skip, e.g. weekends.</p>`;
@@ -625,7 +631,8 @@ function scheduleForm() {
         await api('/api/schedules', 'POST', d);
         toast('Scheduled!', 'good');
         close();
-        pageSchedules();
+        if (curPage === 'calendar') pageCalendar();
+        else pageSchedules();
       });
     };
   }, 'sheet-full');
@@ -1196,9 +1203,231 @@ async function pageProfile() {
   };
 }
 
+/* ---------- Sri Lanka holidays (Public / Bank / Mercantile / Poya) ---------- */
+/* Sources: Gazette Extraordinary (Holidays Act), Department of Government Printing.
+   Islamic dates may shift by one day subject to moon sighting. */
+const SL_HOLIDAYS = {
+  2025: [
+    { d: '2025-01-13', n: 'Duruthu Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2025-01-14', n: 'Tamil Thai Pongal Day', t: ['public', 'bank', 'mercantile'] },
+    { d: '2025-02-04', n: 'Independence Day', t: ['public', 'bank', 'mercantile'] },
+    { d: '2025-02-12', n: 'Navam Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2025-02-26', n: 'Maha Sivarathri Day', t: ['public', 'bank'] },
+    { d: '2025-03-13', n: 'Medin Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2025-03-31', n: 'Id-Ul-Fitr (Ramazan Festival Day)', t: ['public', 'bank'] },
+    { d: '2025-04-12', n: 'Bak Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2025-04-13', n: 'Day Prior to Sinhala & Tamil New Year Day', t: ['public', 'bank', 'mercantile'] },
+    { d: '2025-04-14', n: 'Sinhala & Tamil New Year Day', t: ['public', 'bank', 'mercantile'] },
+    { d: '2025-04-15', n: 'Special Bank Holiday', t: ['bank'] },
+    { d: '2025-04-18', n: 'Good Friday', t: ['public', 'bank'] },
+    { d: '2025-05-01', n: 'May Day (International Workers’ Day)', t: ['public', 'bank', 'mercantile'] },
+    { d: '2025-05-12', n: 'Vesak Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2025-05-13', n: 'Day Following Vesak Full Moon Poya Day', t: ['public', 'bank', 'mercantile'] },
+    { d: '2025-06-07', n: 'Id-Ul-Alha (Hadji Festival Day)', t: ['public', 'bank'] },
+    { d: '2025-06-10', n: 'Poson Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2025-07-10', n: 'Esala Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2025-08-08', n: 'Nikini Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2025-09-05', n: 'Milad-Un-Nabi (Holy Prophet’s Birthday)', t: ['public', 'bank', 'mercantile'] },
+    { d: '2025-09-07', n: 'Binara Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2025-10-06', n: 'Vap Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2025-10-20', n: 'Deepavali Festival Day', t: ['public', 'bank'] },
+    { d: '2025-11-05', n: 'Il Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2025-12-04', n: 'Unduvap Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2025-12-25', n: 'Christmas Day', t: ['public', 'bank', 'mercantile'] },
+  ],
+  2026: [
+    { d: '2026-01-03', n: 'Duruthu Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2026-01-15', n: 'Tamil Thai Pongal Day', t: ['public', 'bank', 'mercantile'] },
+    { d: '2026-02-01', n: 'Navam Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2026-02-04', n: 'Independence Day', t: ['public', 'bank', 'mercantile'] },
+    { d: '2026-02-15', n: 'Maha Sivarathri Day', t: ['public', 'bank'] },
+    { d: '2026-03-02', n: 'Medin Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2026-03-21', n: 'Id-Ul-Fitr (Ramazan Festival Day)', t: ['public', 'bank'] },
+    { d: '2026-04-01', n: 'Bak Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2026-04-03', n: 'Good Friday', t: ['public', 'bank'] },
+    { d: '2026-04-13', n: 'Day Prior to Sinhala & Tamil New Year Day', t: ['public', 'bank', 'mercantile'] },
+    { d: '2026-04-14', n: 'Sinhala & Tamil New Year Day', t: ['public', 'bank', 'mercantile'] },
+    { d: '2026-05-01', n: 'Vesak Full Moon Poya Day & May Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2026-05-02', n: 'Day Following Vesak Full Moon Poya Day', t: ['mercantile'] },
+    { d: '2026-05-28', n: 'Id-Ul-Alha (Hadji Festival Day)', t: ['public', 'bank'] },
+    { d: '2026-05-30', n: 'Adhi Poson Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2026-06-29', n: 'Poson Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2026-07-29', n: 'Esala Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2026-08-26', n: 'Milad-Un-Nabi (Holy Prophet’s Birthday)', t: ['public', 'bank', 'mercantile'] },
+    { d: '2026-08-27', n: 'Nikini Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2026-09-26', n: 'Binara Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2026-10-25', n: 'Vap Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2026-11-08', n: 'Deepavali Festival Day', t: ['public', 'bank'] },
+    { d: '2026-11-24', n: 'Il Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2026-12-23', n: 'Unduvap Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2026-12-25', n: 'Christmas Day', t: ['public', 'bank', 'mercantile'] },
+  ],
+  2027: [
+    { d: '2027-01-22', n: 'Duruthu Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2027-02-04', n: 'Independence Day', t: ['public', 'bank', 'mercantile'] },
+    { d: '2027-02-20', n: 'Navam Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2027-03-21', n: 'Medin Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2027-04-13', n: 'Day Prior to Sinhala & Tamil New Year Day', t: ['public', 'bank', 'mercantile'] },
+    { d: '2027-04-14', n: 'Sinhala & Tamil New Year Day', t: ['public', 'bank', 'mercantile'] },
+    { d: '2027-04-20', n: 'Bak Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2027-05-01', n: 'May Day (International Workers’ Day)', t: ['public', 'bank', 'mercantile'] },
+    { d: '2027-05-20', n: 'Vesak Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2027-05-21', n: 'Day Following Vesak Full Moon Poya Day', t: ['public', 'bank', 'mercantile'] },
+    { d: '2027-06-18', n: 'Poson Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2027-07-18', n: 'Esala Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2027-08-16', n: 'Nikini Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2027-09-15', n: 'Binara Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2027-10-14', n: 'Vap Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2027-11-13', n: 'Il Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2027-12-12', n: 'Unduvap Full Moon Poya Day', t: ['public', 'bank', 'mercantile', 'poya'] },
+    { d: '2027-12-25', n: 'Christmas Day', t: ['public', 'bank', 'mercantile'] },
+  ],
+};
+const HOLIDAY_TYPE_LABEL = { public: 'Public', bank: 'Bank', mercantile: 'Mercantile', poya: 'Poya' };
+const HOLIDAY_TYPE_CLASS = { public: 'h-pub', bank: 'h-bank', mercantile: 'h-merc', poya: 'h-poya' };
+
+let calYear = null, calMonth = null; // 0-based month
+
+function holidaysForMonth(y, m) {
+  const list = SL_HOLIDAYS[y] || [];
+  const prefix = `${y}-${String(m + 1).padStart(2, '0')}-`;
+  return list.filter((h) => h.d.startsWith(prefix));
+}
+
+function holidayMapForYear(y) {
+  const map = {};
+  (SL_HOLIDAYS[y] || []).forEach((h) => { map[h.d] = h; });
+  return map;
+}
+
+async function pageCalendar() {
+  const todayStr = slDate(0);
+  if (calYear == null) {
+    const [yy, mm] = todayStr.split('-').map(Number);
+    calYear = yy;
+    calMonth = mm - 1;
+  }
+  // Load schedules to mark days that already have a reminder
+  let scheduleDates = {};
+  try {
+    const data = await api('/api/schedules');
+    (data.schedules || []).forEach((s) => {
+      if (!['PENDING', 'ACTIVE'].includes(s.status)) return;
+      if (s.schedule_type === 'ONE_TIME' && s.next_run_at) {
+        const d = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Colombo' }).format(new Date(s.next_run_at * 1000));
+        if (!scheduleDates[d]) scheduleDates[d] = [];
+        scheduleDates[d].push(s);
+      }
+    });
+  } catch { /* ignore */ }
+
+  const render = () => {
+    const y = calYear, m = calMonth;
+    const first = new Date(Date.UTC(y, m, 1));
+    const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    // Mon=0 … Sun=6 for Sri Lanka-friendly week start
+    let startDow = (first.getUTCDay() + 6) % 7;
+    const hMap = holidayMapForYear(y);
+    const monthHolidays = holidaysForMonth(y, m);
+    const cells = [];
+    for (let i = 0; i < startDow; i++) cells.push('<div class="cal-cell empty"></div>');
+    for (let day = 1; day <= daysInMonth; day++) {
+      const ds = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const h = hMap[ds];
+      const isToday = ds === todayStr;
+      const hasRem = !!scheduleDates[ds];
+      const classes = ['cal-cell', 'day'];
+      if (isToday) classes.push('today');
+      if (h) {
+        classes.push('holiday');
+        if (h.t.includes('poya')) classes.push('is-poya');
+        else if (h.t.includes('mercantile')) classes.push('is-merc');
+        else classes.push('is-pub');
+      }
+      if (hasRem) classes.push('has-rem');
+      const dots = [];
+      if (h) {
+        if (h.t.includes('poya')) dots.push('<span class="cdot poya" title="Poya"></span>');
+        if (h.t.includes('public')) dots.push('<span class="cdot pub" title="Public"></span>');
+        if (h.t.includes('mercantile') && !h.t.includes('poya')) dots.push('<span class="cdot merc" title="Mercantile"></span>');
+        if (h.t.includes('bank') && !h.t.includes('public') && !h.t.includes('poya')) dots.push('<span class="cdot bank" title="Bank"></span>');
+      }
+      if (hasRem) dots.push('<span class="cdot rem" title="Your reminder"></span>');
+      const title = h ? esc(h.n) : (hasRem ? 'Has reminder — tap to add another' : 'Tap to set a reminder');
+      cells.push(`<button type="button" class="${classes.join(' ')}" data-date="${ds}" title="${title}">
+        <span class="dnum">${day}</span>
+        ${dots.length ? `<span class="cdots">${dots.join('')}</span>` : ''}
+        ${h ? `<span class="hname">${esc(h.n.split(' ').slice(0, 2).join(' '))}</span>` : ''}
+      </button>`);
+    }
+    const canPrev = y > 2025 || (y === 2025 && m > 0);
+    const canNext = y < 2027 || (y === 2027 && m < 11);
+    $('#main').innerHTML = `
+    <div class="page-head">
+      <h2>Calendar</h2>
+      <button class="btn right" id="cal-today">Today</button>
+    </div>
+    <p class="muted small" style="margin-bottom:12px">Sri Lankan public, bank, mercantile &amp; Poya holidays. Tap any day to schedule an email reminder (counts toward your schedule limit).</p>
+    <div class="cal-nav">
+      <button type="button" class="btn ghost iconbtn" id="cal-prev" ${canPrev ? '' : 'disabled'} aria-label="Previous month">${ic('back')}</button>
+      <div class="cal-title">${MONTHS[m]} ${y}</div>
+      <button type="button" class="btn ghost iconbtn" id="cal-next" ${canNext ? '' : 'disabled'} aria-label="Next month"><svg class="icon-svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
+    </div>
+    <div class="cal-grid">
+      <div class="cal-dow">Mon</div><div class="cal-dow">Tue</div><div class="cal-dow">Wed</div><div class="cal-dow">Thu</div><div class="cal-dow">Fri</div><div class="cal-dow">Sat</div><div class="cal-dow">Sun</div>
+      ${cells.join('')}
+    </div>
+    <div class="cal-legend">
+      <span><i class="cdot poya"></i> Poya</span>
+      <span><i class="cdot pub"></i> Public</span>
+      <span><i class="cdot merc"></i> Mercantile</span>
+      <span><i class="cdot bank"></i> Bank only</span>
+      <span><i class="cdot rem"></i> Your reminder</span>
+    </div>
+    ${monthHolidays.length ? `
+    <div class="sec-title" style="margin-top:18px">Holidays this month</div>
+    <div class="list cal-hlist">${monthHolidays.map((h) => `
+      <div class="card item cal-hitem" data-date="${h.d}">
+        <div class="row">
+          <strong>${esc(h.d.slice(8))}/${esc(h.d.slice(5, 7))}</strong>
+          <span class="cal-tags">${h.t.map((t) => `<span class="htag ${HOLIDAY_TYPE_CLASS[t]}">${HOLIDAY_TYPE_LABEL[t]}</span>`).join('')}</span>
+        </div>
+        <div class="small" style="margin-top:4px">${esc(h.n)}</div>
+        <div class="actions"><button class="btn ghost smallbtn" data-remind="${h.d}">+ Reminder</button></div>
+      </div>`).join('')}</div>` : '<p class="muted small" style="margin-top:14px">No official holidays this month.</p>'}
+    <p class="muted small" style="margin-top:14px">Islamic festival dates may shift by one day subject to moon sighting. Official gazette takes priority.</p>`;
+
+    $('#cal-prev').onclick = () => {
+      if (calMonth === 0) { calYear--; calMonth = 11; } else calMonth--;
+      render();
+    };
+    $('#cal-next').onclick = () => {
+      if (calMonth === 11) { calYear++; calMonth = 0; } else calMonth++;
+      render();
+    };
+    $('#cal-today').onclick = () => {
+      const [yy, mm] = todayStr.split('-').map(Number);
+      calYear = yy; calMonth = mm - 1;
+      render();
+    };
+    const openDay = (ds) => {
+      const h = hMap[ds];
+      const subject = h ? `Reminder: ${h.n}` : 'Reminder';
+      const message = h
+        ? `Hi {name},\n\nThis is a reminder for ${h.n} (${ds}).\n\nHave a great day!`
+        : `Hi {name},\n\nThis is your scheduled reminder for ${ds}.\n\nHave a great day!`;
+      scheduleForm({ date: ds, subject, message });
+    };
+    $$('.cal-cell.day').forEach((el) => el.onclick = () => openDay(el.dataset.date));
+    $$('[data-remind]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); openDay(b.dataset.remind); });
+  };
+  render();
+}
+
 async function pageMore() {
   const groups = [
     { title: 'Your account', items: [
+      { id: 'calendar', label: 'Calendar', desc: 'Sri Lankan holidays & reminders', icon: 'calendar', tone: 'blue' },
       { id: 'history', label: 'Email history', desc: 'Everything you have sent', icon: 'list', tone: 'blue' },
       { id: 'templates', label: 'Templates', desc: 'Reusable messages', icon: 'file', tone: 'violet' },
       { id: 'campaigns', label: 'Campaigns', desc: 'Email many contacts at once', icon: 'mega', tone: 'amber' },
