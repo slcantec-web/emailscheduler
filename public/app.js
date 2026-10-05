@@ -539,6 +539,7 @@ async function pageSchedules() {
 function scheduleForm() {
   modal(`<h3>New schedule</h3>
   <form id="sf">
+    <div class="cf-grid"><div class="cf-col">
     <label>Repeat</label>
     <select name="schedule_type" id="stype">
       <option value="ONE_TIME">One-time (specific date)</option>
@@ -550,14 +551,16 @@ function scheduleForm() {
       <option value="ANNIVERSARY">Anniversary (yearly)</option>
     </select>
     <div id="when-fields"></div>
+    <label>Time (Colombo, Sri Lanka UTC+5:30)</label><input name="time" type="time" value="08:00" required>
+    <p class="hint">All times use Asia/Colombo (+5:30).</p>
+    <label>From name</label><input name="sender_name" maxlength="60" placeholder="${esc(me.sender_name || '')}">
+    </div><div class="cf-col">
     <label>Recipient email</label>${recipField()}
     <label>Recipient name</label><input name="recipient_name" maxlength="80">
     <label>Subject</label><input name="subject" maxlength="200" value="Reminder" required>
     <label>Message</label><textarea name="message" rows="4" required placeholder="Hi {name}! ..."></textarea>
-    <label>Time (Colombo, Sri Lanka UTC+5:30)</label><input name="time" type="time" value="08:00" required>
-    <p class="hint">All times use Asia/Colombo (+5:30).</p>
-    <label>From name</label><input name="sender_name" maxlength="60" placeholder="${esc(me.sender_name || '')}">
-    <button class="btn block" style="margin-top:12px">Schedule</button>
+    </div></div>
+    <button class="btn block">Schedule</button>
   </form>`, (sheet, close) => {
     bindRecipient(sheet, '[name="recipient_name"]');
     const when = $('#when-fields', sheet);
@@ -598,7 +601,7 @@ function scheduleForm() {
         pageSchedules();
       });
     };
-  });
+  }, 'sheet-full');
 }
 
 const initials = (n) => (String(n || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('') || '?').toUpperCase();
