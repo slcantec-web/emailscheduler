@@ -618,3 +618,18 @@ label.daychip{margin:0;position:relative;display:inline-block}
   .cal-grid{max-width:840px}
   .cal-cell{min-height:84px}
 }
+
+/* ---------- contacts: smooth scrolling on mobile ---------- */
+.cr{
+  box-shadow:0 1px 2px rgba(20,22,50,.08);
+  content-visibility:auto;
+  contain-intrinsic-size:auto 46px;
+}
+#clist{contain:layout style}
+.cr-main,.iconbtn{touch-action:manipulation}
+.crow.on{outline:0;box-shadow:inset 0 0 0 2px var(--brand)}
+.topbar,.bottomnav,.selbar{transform:translateZ(0);will-change:transform}
+.searchbar{transform:translateZ(0)}
+@media (hover:none) and (pointer:coarse){
+  .main #clist .cr{box-shadow:none;border:1px solid var(--line)}
+}

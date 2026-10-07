@@ -1,5 +1,5 @@
 // App-shell cache. API calls are never cached.
-const CACHE = 'email-shell-v2';
+const CACHE = 'email-shell-v3';
 const SHELL = ['/', '/index.html', '/app.css', '/app.js', '/icon.svg', '/manifest.json'];
 
 self.addEventListener('install', (e) => {

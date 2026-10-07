@@ -1065,7 +1065,12 @@ async function pageContacts() {
     toast(`Deleted ${r.removed}`, 'good');
     paint();
   };
-  $('#cq').oninput = (e) => { q = e.target.value.trim(); paint(); };
+  let qt;
+  $('#cq').oninput = (e) => {
+    clearTimeout(qt);
+    const v = e.target.value.trim();
+    qt = setTimeout(() => { q = v; paint(); }, 150);
+  };
   $('#selall').onclick = () => { shown().forEach((c) => sel.add(c.id)); paint(); };
   $('#selclear').onclick = () => { sel.clear(); paint(); };
   $('#seldel').onclick = async () => {
